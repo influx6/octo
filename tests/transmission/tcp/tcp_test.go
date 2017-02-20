@@ -137,6 +137,9 @@ func TestClustereServers(t *testing.T) {
 		"PING": func(m utils.Message, tx octo.Transmission) error {
 			return tx.Send(utils.WrapResponseBlock([]byte("PONG"), nil), true)
 		},
+		"Auth": func(m utils.Message, tx octo.Transmission) error {
+			return tx.Send(utils.WrapResponseBlock([]byte("{}"), nil), true)
+		},
 		"INFO": func(m utils.Message, tx octo.Transmission) error {
 			_, serverInfo := tx.Info()
 
@@ -162,6 +165,12 @@ func TestClustereServers(t *testing.T) {
 	server.Listen(system)
 	server2.Listen(system)
 
+	if err := server2.RelateWithCluster(":6060"); err != nil {
+		tests.Failed(t, "Should have successfully connected with cluster: %s.", err)
+	}
+	tests.Passed(t, "Should have successfully connected with cluster.")
+
+	server.Wait()
 }
 
 func validateResponseHeader(t *testing.T, data []byte, target []byte) {
