@@ -19,13 +19,13 @@ func TestServer(t *testing.T) {
 		"CLOSE": func(m utils.Message, tx octo.Transmission) error {
 			defer tx.Close()
 
-			return tx.Send([]byte("OK"), true)
+			return tx.Send(utils.WrapResponseBlock([]byte("OK"), nil), true)
 		},
 		"PONG": func(m utils.Message, tx octo.Transmission) error {
-			return tx.Send([]byte("PING"), true)
+			return tx.Send(utils.WrapResponseBlock([]byte("PING"), nil), true)
 		},
 		"PING": func(m utils.Message, tx octo.Transmission) error {
-			return tx.Send([]byte("PONG"), true)
+			return tx.Send(utils.WrapResponseBlock([]byte("PONG"), nil), true)
 		},
 		"INFO": func(m utils.Message, tx octo.Transmission) error {
 			_, serverInfo := tx.Info()
@@ -40,71 +40,128 @@ func TestServer(t *testing.T) {
 	})
 
 	server := tcp.NewServer(log, tcp.ServerAttr{
-		Addr: ":4050",
+		Addr: ":6050",
 		// ClusterAddr: ":6060",
 	})
 
 	server.Listen(system)
 
-	client, err := mock.NewTCPClient(":4050")
+	client, err := mock.NewTCPClient(":6050")
 	if err != nil {
 		tests.Failed(t, "Should have successfully connected to host server ':4050': %s.", err)
 	}
 	tests.Passed(t, "Should have successfully connected to host server ':4050'.")
 
+	defer server.Close()
 	defer client.Close()
 
-	if errx := client.Write(utils.WrapResponseBlock([]byte("PING"), nil), true); err != nil {
-		tests.Failed(t, "Should have delivered 'PING' message: %s.", errx)
+	t.Logf("\tWhen 'PONG' is sent to the server")
+	{
+		if errx := client.Write(utils.WrapResponseBlock([]byte("PING"), nil), true); err != nil {
+			tests.Failed(t, "Should have delivered 'PING' message: %s.", errx)
+		}
+		tests.Passed(t, "Should have delivered 'PING' message.")
+
+		response, errm := client.Read()
+		if errm != nil {
+			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+		}
+		tests.Passed(t, "Should have successfully received response from server.")
+
+		validateResponseHeader(t, response, []byte("PONG"))
 	}
-	tests.Passed(t, "Should have delivered 'PING' message.")
 
-	response, err := client.Read()
-	if err != nil {
-		tests.Failed(t, "Should have successfully received response from server: %s.", err)
+	t.Logf("\tWhen 'PING' is sent to the server")
+	{
+		if errx := client.Write(utils.WrapResponseBlock([]byte("PONG"), nil), true); err != nil {
+			tests.Failed(t, "Should have delivered 'PONG' message: %s.", errx)
+		}
+		tests.Passed(t, "Should have delivered 'PONG' message.")
+
+		response, errm := client.Read()
+		if errm != nil {
+			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+		}
+		tests.Passed(t, "Should have successfully received response from server.")
+
+		validateResponseHeader(t, response, []byte("PING"))
 	}
-	tests.Passed(t, "Should have successfully received response from server.")
 
-	validateResponseHeader(t, response, []byte("PONG"))
+	t.Logf("\tWhen 'INFO' is sent to the server")
+	{
+		if errx := client.Write(utils.WrapResponseBlock([]byte("INFO"), nil), true); err != nil {
+			tests.Failed(t, "Should have delivered 'CLOSE' message: %s.", errx)
+		}
+		tests.Passed(t, "Should have delivered 'CLOSE' message.")
 
-	if errx := client.Write(utils.WrapResponseBlock([]byte("PONG"), nil), true); err != nil {
-		tests.Failed(t, "Should have delivered 'PONG' message: %s.", errx)
+		response, errm := client.Read()
+		if errm != nil {
+			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+		}
+		tests.Passed(t, "Should have successfully received response from server.")
+
+		validateResponseHeader(t, response, []byte("INFORES"))
 	}
-	tests.Passed(t, "Should have delivered 'PONG' message.")
 
-	response, err = client.Read()
-	if err != nil {
-		tests.Failed(t, "Should have successfully received response from server: %s.", err)
+	t.Logf("\tWhen 'CLOSED' is sent to the server")
+	{
+		if errx := client.Write(utils.WrapResponseBlock([]byte("CLOSE"), nil), true); err != nil {
+			tests.Failed(t, "Should have delivered 'CLOSE' message: %s.", errx)
+		}
+		tests.Passed(t, "Should have delivered 'CLOSE' message.")
+
+		response, errm := client.Read()
+		if errm != nil {
+			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+		}
+		tests.Passed(t, "Should have successfully received response from server.")
+
+		validateResponseHeader(t, response, []byte("OK"))
 	}
-	tests.Passed(t, "Should have successfully received response from server.")
+}
 
-	validateResponseHeader(t, response, []byte("PING"))
+// TestClusterServers tests the validity of our server code in connecting and
+// relating between clusters.
+func TestClustereServers(t *testing.T) {
+	log := mock.NewLogger(t)
 
-	if errx := client.Write(utils.WrapResponseBlock([]byte("INFO"), nil), true); err != nil {
-		tests.Failed(t, "Should have delivered 'CLOSE' message: %s.", errx)
-	}
-	tests.Passed(t, "Should have delivered 'CLOSE' message.")
+	system := mock.NewMSystem(map[string]mock.MessageHandler{
+		"CLOSE": func(m utils.Message, tx octo.Transmission) error {
+			defer tx.Close()
 
-	response, err = client.Read()
-	if err != nil {
-		tests.Failed(t, "Should have successfully received response from server: %s.", err)
-	}
-	tests.Passed(t, "Should have successfully received response from server.")
+			return tx.Send(utils.WrapResponseBlock([]byte("OK"), nil), true)
+		},
+		"PONG": func(m utils.Message, tx octo.Transmission) error {
+			return tx.Send(utils.WrapResponseBlock([]byte("PING"), nil), true)
+		},
+		"PING": func(m utils.Message, tx octo.Transmission) error {
+			return tx.Send(utils.WrapResponseBlock([]byte("PONG"), nil), true)
+		},
+		"INFO": func(m utils.Message, tx octo.Transmission) error {
+			_, serverInfo := tx.Info()
 
-	validateResponseHeader(t, response, []byte("INFORES"))
+			infx, err := json.Marshal(serverInfo)
+			if err != nil {
+				return err
+			}
 
-	if errx := client.Write(utils.WrapResponseBlock([]byte("CLOSE"), nil), true); err != nil {
-		tests.Failed(t, "Should have delivered 'CLOSE' message: %s.", errx)
-	}
-	tests.Passed(t, "Should have delivered 'CLOSE' message.")
+			return tx.Send(utils.WrapResponseBlock([]byte("INFORES"), infx), true)
+		},
+	})
 
-	response, err = client.Read()
-	if err != nil {
-		tests.Failed(t, "Should have successfully received response from server: %s.", err)
-	}
-	tests.Passed(t, "Should have successfully received response from server.")
+	server := tcp.NewServer(log, tcp.ServerAttr{
+		Addr:        ":6050",
+		ClusterAddr: ":6060",
+	})
 
-	validateResponseHeader(t, response, []byte("OK"))
+	server2 := tcp.NewServer(log, tcp.ServerAttr{
+		Addr:        ":7050",
+		ClusterAddr: ":7060",
+	})
+
+	server.Listen(system)
+	server2.Listen(system)
+
 }
 
 func validateResponseHeader(t *testing.T, data []byte, target []byte) {
@@ -119,8 +176,8 @@ func validateResponseHeader(t *testing.T, data []byte, target []byte) {
 	}
 	tests.Passed(t, "Should have successfully received atleast 1 response from server.")
 
-	if bytes.Equal(receivedMessages[0].Command, target) {
-		tests.Failed(t, "Should have successfully matched response header as %+q.", target)
+	if !bytes.Equal(receivedMessages[0].Command, target) {
+		tests.Failed(t, "Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Command)
 	}
 	tests.Passed(t, "Should have successfully matched response header as %+q.", target)
 }

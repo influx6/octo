@@ -59,7 +59,8 @@ func (t *Transmission) Ctx() context.Context {
 
 // Close ends the internal conneciton.
 func (t *Transmission) Close() error {
-	return t.client.Close()
+	go t.client.Close()
+	return nil
 }
 
 //================================================================================
@@ -97,6 +98,14 @@ func (c *Client) Transmission() *Transmission {
 func (c *Client) Close() error {
 	c.logs.Log(octo.LOGINFO, "tcp.Client.Close", "Started")
 
+	c.cl.Lock()
+	if c.closed {
+		c.cl.Unlock()
+		c.logs.Log(octo.LOGINFO, "tcp.Client.Close", "Completed : Already Closed")
+		return nil
+	}
+	c.cl.Unlock()
+
 	c.logs.Log(octo.LOGINFO, "tcp.Client.Close", "Waiting for all sendRequest to End")
 	c.sendg.Wait()
 
@@ -105,7 +114,7 @@ func (c *Client) Close() error {
 	c.doClosed = true
 	c.cl.Unlock()
 
-	c.logs.Log(octo.LOGINFO, "tcp.Client.Close", "Waiting for acceptRequest to End")
+	c.logs.Log(octo.LOGINFO, "tcp.Client.Close", "Waiting for all acceptRequests to End")
 	c.wg.Wait()
 
 	if err := c.conn.Close(); err != nil {
@@ -287,31 +296,54 @@ func (c *Client) acceptRequests() {
 
 	for {
 		c.cl.Lock()
-		{
-			if c.closed {
-				c.cl.Unlock()
-				break
-			}
+		if c.closed {
+			c.cl.Unlock()
+			break
 		}
 		c.cl.Unlock()
 
 		if c.buffer.Len() > 0 {
 			if err := c.Send(c.buffer.Bytes(), true); err != nil {
 				c.logs.Log(octo.LOGERROR, "tcp.Client.acceptRequests", "Sending buffer failed : %+s", err)
-				break
+				continue
 			}
 		}
+
+		c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 		n, err := c.conn.Read(block)
 		if err != nil {
 			c.logs.Log(octo.LOGERROR, "tcp.Client.acceptRequests", "Read Error : %+s", err)
-			go c.Close()
+			c.conn.SetReadDeadline(time.Time{})
+
+			c.cl.Lock()
+			{
+				if !c.doClosed {
+					c.cl.Unlock()
+					go c.Close()
+					return
+				}
+			}
+			c.cl.Unlock()
+
 			break
 		}
 
+		c.conn.SetReadDeadline(time.Time{})
+
 		if err := c.system.Serve(block[:n], c.Transmission()); err != nil {
 			c.logs.Log(octo.LOGERROR, "tcp.Client.acceptRequests", "Read Error : %+s", err)
-			go c.Close()
+
+			c.cl.Lock()
+			{
+				if !c.doClosed {
+					c.cl.Unlock()
+					go c.Close()
+					return
+				}
+			}
+			c.cl.Unlock()
+
 			break
 		}
 
@@ -324,7 +356,7 @@ func (c *Client) acceptRequests() {
 		}
 	}
 
-	c.logs.Log(octo.LOGINFO, "tcp.Client.acceptRequests", "Finished")
+	c.logs.Log(octo.LOGINFO, "tcp.Client.acceptRequests", "Completed")
 }
 
 // handleRequest processes data requests coming in from the client's internal
@@ -547,14 +579,23 @@ func (s *Server) Close() error {
 	s.logs.Log(octo.LOGINFO, "tcp.Server.Close", "Started : %#v", s.info)
 
 	s.rl.Lock()
-	if s.running {
+	if !s.running {
 		s.rl.Unlock()
-		if err := s.listener.Close(); err != nil {
-			s.logs.Log(octo.LOGERROR, "tcp.Server.Close", "Completed : Close Error : %+s", err)
-		}
+		return nil
+	}
+	s.rl.Unlock()
+
+	s.rl.Lock()
+	s.running = false
+	s.rl.Unlock()
+
+	s.wg.Wait()
+
+	if err := s.listener.Close(); err != nil {
+		s.logs.Log(octo.LOGERROR, "tcp.Server.Close", "Completed : Close Error : %+s", err)
+		return err
 	}
 
-	s.rl.Unlock()
 	return nil
 }
 
@@ -592,9 +633,8 @@ func (s *Server) Listen(system octo.System) error {
 		s.logs.Log(octo.LOGERROR, "tcp.Server.Listen", "New Cluster Listener : %s", s.listener.Addr())
 	}
 
-	s.rl.Unlock()
-
 	s.running = true
+	s.rl.Unlock()
 
 	if s.clusterListener != nil {
 		s.wg.Add(2)
@@ -653,12 +693,23 @@ func (s *Server) handleClientConnections(system octo.System) {
 
 	sleepTime := minSleepTime
 
-	s.logs.Log(octo.LOGINFO, "tcp.Server.handleClientConnections", "Intiating Accept Loop")
-	for s.running {
+	s.logs.Log(octo.LOGINFO, "tcp.Server.handleClientConnections", "Initiating Accept Loop")
+	for {
+		// TODO: Is there a way of avoiding this mutex in such a hot path? s.rl.Lock()
+		if !s.running {
+			s.rl.Unlock()
+			return
+		}
+		s.rl.Unlock()
 
 		conn, err := s.listener.Accept()
 		if err != nil {
 			s.logs.Log(octo.LOGERROR, "Server.handleClientConnections", "Error : %s", err.Error())
+			if opError, ok := err.(*net.OpError); ok {
+				if opError.Op == "accept" {
+					break
+				}
+			}
 
 			if tmpError, ok := err.(net.Error); ok && tmpError.Temporary() {
 				s.logs.Log(octo.LOGERROR, "Server.handleClientConnections", "Temporary Error : %s : Sleeping %dms", err.Error(), sleepTime/time.Millisecond)
@@ -667,40 +718,44 @@ func (s *Server) handleClientConnections(system octo.System) {
 				if sleepTime > maxSleepTime {
 					sleepTime = minSleepTime
 				}
-			}
 
-			localAddr := conn.LocalAddr().String()
-			remoteAddr := conn.RemoteAddr().String()
-			clientID := uuid.NewUUID().String()
-
-			s.logs.Log(octo.LOGINFO, "tcp.Server.handleClientConnections", "New Client : Local[%q] : Remote[%q]", localAddr, remoteAddr)
-
-			var client Client
-			client = Client{
-				server: s,
-				conn:   conn,
-				logs:   s.logs,
-				system: system,
-				info: octo.Info{
-					Addr:   localAddr,
-					Remote: remoteAddr,
-					UUID:   clientID,
-					SUUID:  s.info.SUUID,
-				},
-				clusterClient:       false,
-				connectionInitiator: false,
-				writer:              bufio.NewWriter(conn),
-			}
-
-			if err := client.Listen(); err != nil {
-				s.logs.Log(octo.LOGERROR, "tcp.Server.handleClientConnections", "New Client Error : %s", err.Error())
-				client.conn.Close()
 				continue
 			}
+		}
 
-			s.clients = append(s.clients, &client)
+		s.logs.Log(octo.LOGINFO, "tcp.Server.handleClientConnections", "New Client : Intiaiting Client Creation Process: : Addr[%q]", "BOB")
+
+		localAddr := conn.LocalAddr().String()
+		remoteAddr := conn.RemoteAddr().String()
+		clientID := uuid.NewUUID().String()
+
+		s.logs.Log(octo.LOGINFO, "tcp.Server.handleClientConnections", "New Client : Local[%q] : Remote[%q]", localAddr, remoteAddr)
+
+		var client Client
+		client = Client{
+			server: s,
+			conn:   conn,
+			logs:   s.logs,
+			system: system,
+			info: octo.Info{
+				Addr:   localAddr,
+				Remote: remoteAddr,
+				UUID:   clientID,
+				SUUID:  s.info.SUUID,
+			},
+			clusterClient:       false,
+			connectionInitiator: false,
+			writer:              bufio.NewWriter(conn),
+		}
+
+		if err := client.Listen(); err != nil {
+			s.logs.Log(octo.LOGERROR, "tcp.Server.handleClientConnections", "New Client Error : %s", err.Error())
+			client.conn.Close()
 			continue
 		}
+
+		s.clients = append(s.clients, &client)
+		continue
 
 	}
 
@@ -715,11 +770,22 @@ func (s *Server) handleClusterConnections() {
 
 	sleepTime := minSleepTime
 
-	for s.running {
+	for {
+		// TODO: Is there a way of avoiding this mutex in such a hot path? s.rl.Lock()
+		if !s.running {
+			s.rl.Unlock()
+			return
+		}
+		s.rl.Unlock()
 
 		conn, err := s.listener.Accept()
 		if err != nil {
 			s.logs.Log(octo.LOGERROR, "Server.handleClientConnections", "Error : %s", err.Error())
+			if opError, ok := err.(*net.OpError); ok {
+				if opError.Op == "accept" {
+					break
+				}
+			}
 
 			if tmpError, ok := err.(net.Error); ok && tmpError.Temporary() {
 				s.logs.Log(octo.LOGERROR, "Server.handleClientConnections", "Temporary Error : %s : Sleeping %dms", err.Error(), sleepTime/time.Millisecond)
@@ -728,39 +794,42 @@ func (s *Server) handleClusterConnections() {
 				if sleepTime > maxSleepTime {
 					sleepTime = minSleepTime
 				}
-			}
 
-			localAddr := conn.LocalAddr().String()
-			remoteAddr := conn.RemoteAddr().String()
-			clientID := uuid.NewUUID().String()
-
-			s.logs.Log(octo.LOGINFO, "tcp.Server.handleClusterConnections", "New Client : Local[%q] : Remote[%q]", localAddr, remoteAddr)
-
-			var client Client
-			client = Client{
-				server: s,
-				conn:   conn,
-				logs:   s.logs,
-				info: octo.Info{
-					Addr:   localAddr,
-					Remote: remoteAddr,
-					UUID:   clientID,
-					SUUID:  s.info.SUUID,
-				},
-				clusterClient:       true,
-				connectionInitiator: false,
-				writer:              bufio.NewWriter(conn),
-			}
-
-			if err := client.Listen(); err != nil {
-				s.logs.Log(octo.LOGERROR, "tcp.Server.handleClusterConnections", "New Client Error : %s", err.Error())
-				client.conn.Close()
 				continue
 			}
+		}
 
-			s.clusters = append(s.clusters, &client)
+		s.logs.Log(octo.LOGINFO, "tcp.Server.handleClusterConnections", "New Client : Intiaiting Client Creation Process: : Addr[%q]", "BOB")
+		localAddr := conn.LocalAddr().String()
+		remoteAddr := conn.RemoteAddr().String()
+		clientID := uuid.NewUUID().String()
+
+		s.logs.Log(octo.LOGINFO, "tcp.Server.handleClusterConnections", "New Client : Local[%q] : Remote[%q]", localAddr, remoteAddr)
+
+		var client Client
+		client = Client{
+			server: s,
+			conn:   conn,
+			logs:   s.logs,
+			info: octo.Info{
+				Addr:   localAddr,
+				Remote: remoteAddr,
+				UUID:   clientID,
+				SUUID:  s.info.SUUID,
+			},
+			clusterClient:       true,
+			connectionInitiator: false,
+			writer:              bufio.NewWriter(conn),
+		}
+
+		if err := client.Listen(); err != nil {
+			s.logs.Log(octo.LOGERROR, "tcp.Server.handleClusterConnections", "New Client Error : %s", err.Error())
+			client.conn.Close()
 			continue
 		}
+
+		s.clusters = append(s.clusters, &client)
+		continue
 	}
 
 	s.logs.Log(octo.LOGINFO, "tcp.Server.handleClusterConnections", "Completed")

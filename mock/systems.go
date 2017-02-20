@@ -2,7 +2,6 @@ package mock
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/influx6/faux/utils"
 	"github.com/influx6/octo"
@@ -29,11 +28,10 @@ func (m *MSystem) Authenticate(auth octo.AuthCredential) error {
 
 // ErrRequestUnsearvable defines the error returned when a request can not
 // be handled.
-var ErrRequestUnsearvable = errors.New("Request Unser")
+var ErrRequestUnsearvable = errors.New("Request Unserveable")
 
 // Serve handles message requests from a giving server.
 func (m *MSystem) Serve(data []byte, tx octo.Transmission) error {
-	fmt.Printf("Serving: %+q\n", data)
 	messages, err := utils.BlockParser.Parse(data)
 	if err != nil {
 		return err
@@ -44,9 +42,9 @@ func (m *MSystem) Serve(data []byte, tx octo.Transmission) error {
 			if err := handler(message, tx); err != nil {
 				return err
 			}
+		} else {
+			return ErrRequestUnsearvable
 		}
-
-		return ErrRequestUnsearvable
 	}
 
 	return nil
