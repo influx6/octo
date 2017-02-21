@@ -16,6 +16,8 @@ func NewLogger(t *testing.T) *Logger {
 }
 
 // Log exposes methods to giving logger to the internal testing.T object.
-func (l *Logger) Log(level string, namespace string, message string, items ...interface{}) {
-	l.t.Logf("%s : %s : %s", level, namespace, fmt.Sprintf(message, items...))
+func (l *Logger) Log(level string, namespace string, function string, message string, items ...interface{}) {
+	if testing.Verbose() {
+		fmt.Printf("%s : %s : %s : %s\n", level, namespace, function, fmt.Sprintf(message, items...))
+	}
 }

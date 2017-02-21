@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/influx6/faux/utils"
 	"github.com/influx6/octo"
@@ -165,12 +166,17 @@ func TestClustereServers(t *testing.T) {
 	server.Listen(system)
 	server2.Listen(system)
 
+	defer server.Close()
+	defer server2.Close()
+
+	<-time.After(2 * time.Second)
+
 	if err := server2.RelateWithCluster(":6060"); err != nil {
 		tests.Failed(t, "Should have successfully connected with cluster: %s.", err)
 	}
 	tests.Passed(t, "Should have successfully connected with cluster.")
 
-	server.Wait()
+	server2.Wait()
 }
 
 func validateResponseHeader(t *testing.T, data []byte, target []byte) {
