@@ -5,6 +5,9 @@ import (
 	"errors"
 	"net"
 	"time"
+
+	"github.com/influx6/octo/consts"
+	"github.com/influx6/octo/netutils"
 )
 
 // TCPClient defines a interface for a type which connects to
@@ -17,6 +20,13 @@ type TCPClient struct {
 
 // NewTCPClient returns a new instance of a TCPClient.
 func NewTCPClient(addr string) (*TCPClient, error) {
+	ip, port, _ := net.SplitHostPort(addr)
+	if ip == "" || ip == consts.AnyIP {
+		if realIP, err := netutils.GetMainIP(); err == nil {
+			addr = net.JoinHostPort(realIP, port)
+		}
+	}
+
 	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
 	if err != nil {
 		return nil, err

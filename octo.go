@@ -10,6 +10,7 @@ const (
 	LOGDEBUG        string = "DEBUG"
 	LOGERROR        string = "ERROR"
 	LOGTRANSMISSION string = "TRANSMISSION"
+	LOGTRANSMITTED  string = "TRANSMITTED"
 )
 
 // Logs defines an interface which provides the capability of structures to meet the

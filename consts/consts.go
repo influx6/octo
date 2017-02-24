@@ -4,7 +4,9 @@ import "errors"
 
 // Contains the set of constant values usable in data transmissions.
 const (
-	CTRL = "\r\n"
+	CTRL  = "\r\n"
+	AnyIP = "0.0.0.0"
+	Zero  = "\x00"
 )
 
 // Contains the set of possible request and response headers.

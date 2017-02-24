@@ -1,10 +1,8 @@
 package octo
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/influx6/faux/utils"
@@ -90,7 +88,6 @@ func (b *BaseSystem) Serve(data []byte, tx Transmission) error {
 
 	for _, message := range messages {
 		command := strings.ToLower(string(message.Command))
-		fmt.Printf("New Message: %+q\n", message)
 		if handler, ok := b.handlers[command]; ok {
 			if err := handler(message, tx); err != nil {
 				return err
@@ -114,21 +111,18 @@ type Clusters interface {
 func ClusterHandlers(master Clusters) map[string]MessageHandler {
 	return map[string]MessageHandler{
 		string(consts.ClusterRequest): func(m utils.Message, tx Transmission) error {
-			parsed, err := json.Marshal(master.Clusters())
-			if err != nil {
-				return err
+			var clusterData [][]byte
+
+			for _, cluster := range master.Clusters() {
+				parsed, err := json.Marshal(cluster)
+				if err != nil {
+					return err
+				}
+
+				clusterData = append(clusterData, parsed)
 			}
 
-			return tx.Send(utils.WrapResponseBlock(consts.ClusterResponse, parsed), true)
-		},
-		string(consts.InfoResponse): func(m utils.Message, tx Transmission) error {
-			var newInfo Info
-
-			if err := json.Unmarshal(bytes.Join(m.Data, []byte("")), &newInfo); err != nil {
-				return err
-			}
-
-			return tx.Send(utils.WrapResponseBlock(consts.OK, nil), true)
+			return tx.Send(utils.MakeByteMessage(consts.ClusterResponse, clusterData...), true)
 		},
 	}
 }
