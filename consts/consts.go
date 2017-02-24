@@ -1,5 +1,7 @@
 package consts
 
+import "errors"
+
 // Contains the set of constant values usable in data transmissions.
 const (
 	CTRL = "\r\n"
@@ -17,4 +19,10 @@ var (
 	AuthResponse       = []byte("AUTHCRED")
 	ClusterRequest     = []byte("CLUSTERS")
 	ClusterResponse    = []byte("CLUSTERRES")
+	OK                 = []byte("OK")
+)
+
+// contains the set of errors used by the package.
+var (
+	ErrConnClosed = errors.New("Connection Closed")
 )

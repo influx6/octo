@@ -132,24 +132,8 @@ func TestClustereServers(t *testing.T) {
 
 			return tx.Send(utils.WrapResponseBlock([]byte("OK"), nil), true)
 		},
-		"PONG": func(m utils.Message, tx octo.Transmission) error {
-			return tx.Send(utils.WrapResponseBlock([]byte("PING"), nil), true)
-		},
-		"PING": func(m utils.Message, tx octo.Transmission) error {
-			return tx.Send(utils.WrapResponseBlock([]byte("PONG"), nil), true)
-		},
-		"Auth": func(m utils.Message, tx octo.Transmission) error {
-			return tx.Send(utils.WrapResponseBlock([]byte("{}"), nil), true)
-		},
-		"INFO": func(m utils.Message, tx octo.Transmission) error {
-			_, serverInfo := tx.Info()
-
-			infx, err := json.Marshal(serverInfo)
-			if err != nil {
-				return err
-			}
-
-			return tx.Send(utils.WrapResponseBlock([]byte("INFORES"), infx), true)
+		"POP": func(m utils.Message, tx octo.Transmission) error {
+			return tx.Send(utils.WrapResponseBlock([]byte("PUSH"), nil), true)
 		},
 	})
 

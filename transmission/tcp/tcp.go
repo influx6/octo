@@ -75,7 +75,9 @@ type Client struct {
 	logs                octo.Logs
 	conn                net.Conn
 	info                octo.Info
+	cinfo               octo.Info
 	system              octo.System
+	primarySystem       *octo.BaseSystem
 	server              *Server
 	sendg               sync.WaitGroup
 	wg                  sync.WaitGroup
@@ -204,8 +206,300 @@ func (c *Client) Listen() error {
 	c.wg.Add(1)
 	go c.acceptRequests()
 
-	c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Listen", "Complete")
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Listen", "Complete")
 	return nil
+}
+
+// acceptRequests beings listening for messages from the giving connection.
+func (c *Client) acceptRequests() {
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptRequests", "Started")
+	defer c.wg.Done()
+
+	block := make([]byte, minDataSize)
+
+	for {
+		c.cl.Lock()
+		if c.closed {
+			c.cl.Unlock()
+			break
+		}
+		c.cl.Unlock()
+
+		if c.buffer.Len() > 0 {
+			if err := c.Send(c.buffer.Bytes(), true); err != nil {
+				c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "Sending buffer failed : %+s", err)
+				continue
+			}
+		}
+
+		c.conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+
+		n, err := c.conn.Read(block)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "ReadTimeout")
+				continue
+			}
+
+			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "Read Error : %+s", err)
+			c.conn.SetReadDeadline(time.Time{})
+
+			c.cl.Lock()
+			{
+				if !c.doClosed {
+					c.cl.Unlock()
+					go c.Close()
+					return
+				}
+			}
+			c.cl.Unlock()
+
+			break
+		}
+
+		c.conn.SetReadDeadline(time.Time{})
+
+		if err := c.handleRequest(block[:n], c.Transmission()); err != nil {
+			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "Read Error : %+s", err)
+
+			c.cl.Lock()
+			{
+				if !c.doClosed {
+					c.cl.Unlock()
+					go c.Close()
+					return
+				}
+			}
+			c.cl.Unlock()
+
+			break
+		}
+
+		if n == len(block) && len(block) < maxDataWrite {
+			block = make([]byte, len(block)*2)
+		}
+
+		if n < len(block)/2 && len(block) > maxDataWrite {
+			block = make([]byte, len(block)/2)
+		}
+	}
+
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptRequests", "Completed")
+}
+
+// handleRequest processes data requests coming in from the client's internal
+// connection.
+func (c *Client) handleRequest(data []byte, tx octo.Transmission) error {
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Started")
+
+	if c.primarySystem == nil {
+		c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Completed")
+		return c.system.Serve(data, tx)
+	}
+
+	unserved, err := c.primarySystem.ServeBase(data, tx)
+	if err != nil {
+		c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Completed : Error : %+s", err)
+		return err
+	}
+
+	var dataMessage [][]byte
+	for _, us := range unserved {
+		dataMessage = append(dataMessage, utils.MakeByteMessage(us.Command, us.Data...))
+	}
+
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Completed")
+	return c.system.Serve(utils.MakeByteMessageGroup(dataMessage...), tx)
+}
+
+// initClusterNegotiation initiates the negotiation of cluster information.
+func (c *Client) initClusterNegotiation() error {
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Cluster Negotiation")
+
+	block := make([]byte, minDataSize)
+
+	c.Send(utils.WrapResponseBlock(consts.ClusterRequest, nil), true)
+
+	dataLen, err := c.conn.Read(block)
+	if err != nil {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		return err
+	}
+
+	if dataLen == 0 {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s", ErrInvalidResponse)
+		return ErrInvalidResponse
+	}
+
+	messages, err := utils.BlockParser.Parse(block[:dataLen])
+	if err != nil {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		return err
+	}
+
+	if len(messages) < 1 {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidResponse)
+		return ErrInvalidResponse
+	}
+
+	if !bytes.Equal(messages[0].Command, consts.ClusterResponse) {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
+		return ErrAuthInvalidResponse
+	}
+
+	var infos []octo.Info
+
+	for _, message := range messages[0].Data {
+		var info octo.Info
+		if err := json.Unmarshal(message, &info); err != nil {
+			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+			return err
+		}
+
+		// If we are matching the same server then skip.
+		if info.SUUID == c.info.SUUID {
+			continue
+		}
+
+		infos = append(infos, info)
+	}
+
+	// c.Send(utils.WrapResponseBlock(consts.ClusterRequest, nil), true)
+
+	c.server.handleClusters(infos)
+
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initClusterNegotiation", "Completed")
+	return nil
+}
+
+// initInfoNegotiation intiaites the negotiation of client connections.
+func (c *Client) initInfoNegotiation() error {
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation")
+
+	c.Send(utils.WrapResponseBlock(consts.InfoRequest, nil), true)
+
+	block, err := c.temporaryRead()
+	if err != nil {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		return err
+	}
+
+	messages, err := utils.BlockParser.Parse(block)
+	if err != nil {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		return err
+	}
+
+	if len(messages) < 1 {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidResponse)
+		return ErrInvalidResponse
+	}
+
+	if !bytes.Equal(messages[0].Command, consts.InfoResponse) {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
+		return ErrAuthInvalidResponse
+	}
+
+	var info octo.Info
+
+	infoData := bytes.Join(messages[0].Data, []byte(""))
+	if err := json.Unmarshal(infoData, &info); err != nil {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		return err
+	}
+
+	// Update the UUID to the servers UUID from the cluster.
+	c.info.UUID = info.SUUID
+	c.cinfo = info
+
+	c.Send(utils.MakeByteMessage(consts.OK, nil), true)
+
+	return nil
+}
+
+// initAuthNegotiation intiaites the negotiation of client connections.
+func (c *Client) initAuthNegotiation() error {
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initAuthNegotiation", "Started")
+
+	c.Send(utils.WrapResponseBlock(consts.AuthRequest, nil), true)
+
+	block := make([]byte, minDataSize)
+
+	dataLen, err := c.conn.Read(block)
+	if err != nil {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", err)
+		return err
+	}
+
+	if dataLen == 0 {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", ErrInvalidResponse)
+		return ErrInvalidResponse
+	}
+
+	messages, err := utils.BlockParser.Parse(block[:dataLen])
+	if err != nil {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", err)
+		return err
+	}
+
+	if len(messages) < 1 {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidResponse)
+		return ErrInvalidResponse
+	}
+
+	if !bytes.Equal(messages[0].Command, consts.AuthResponse) {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", ErrAuthInvalidResponse)
+		return ErrAuthInvalidResponse
+	}
+
+	var auth octo.AuthCredential
+
+	authData := bytes.Join(messages[0].Data, []byte(""))
+	if err := json.Unmarshal(authData, &auth); err != nil {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		return err
+	}
+
+	if err := c.system.Authenticate(auth); err != nil {
+		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Authentication Failed : %s", err)
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) temporaryRead() ([]byte, error) {
+	c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.temporaryRead", "Started")
+	block := make([]byte, minDataSize)
+
+	for {
+		c.cl.Lock()
+		if c.closed {
+			c.cl.Unlock()
+			return nil, consts.ErrConnClosed
+		}
+		c.cl.Unlock()
+
+		c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		dataLen, err := c.conn.Read(block)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.temporaryRead", "Client Negotiation : ReadTimeout")
+				continue
+			}
+
+			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+			c.conn.SetReadDeadline(time.Time{})
+			return nil, err
+		}
+
+		c.conn.SetReadDeadline(time.Time{})
+		block = block[:dataLen]
+		break
+	}
+
+	c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.temporaryRead", "Completed")
+	return block, nil
 }
 
 // SendAll sends the giving data to all clients and clusters the giving
@@ -289,244 +583,11 @@ func (c *Client) Send(data []byte, flush bool) error {
 
 // Info returns the client and server information.
 func (c *Client) Info() (octo.Info, octo.Info) {
+	if c.clusterClient {
+		return c.info, c.server.clusterInfo
+	}
+
 	return c.info, c.server.info
-}
-
-// acceptRequests beings listening for messages from the giving connection.
-func (c *Client) acceptRequests() {
-	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptRequests", "Started")
-	defer c.wg.Done()
-
-	block := make([]byte, minDataSize)
-
-	for {
-		c.cl.Lock()
-		if c.closed {
-			c.cl.Unlock()
-			break
-		}
-		c.cl.Unlock()
-
-		if c.buffer.Len() > 0 {
-			if err := c.Send(c.buffer.Bytes(), true); err != nil {
-				c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "Sending buffer failed : %+s", err)
-				continue
-			}
-		}
-
-		c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-
-		n, err := c.conn.Read(block)
-		if err != nil {
-			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "Read Error : %+s", err)
-			c.conn.SetReadDeadline(time.Time{})
-
-			c.cl.Lock()
-			{
-				if !c.doClosed {
-					c.cl.Unlock()
-					go c.Close()
-					return
-				}
-			}
-			c.cl.Unlock()
-
-			break
-		}
-
-		c.conn.SetReadDeadline(time.Time{})
-
-		if err := c.system.Serve(block[:n], c.Transmission()); err != nil {
-			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "Read Error : %+s", err)
-
-			c.cl.Lock()
-			{
-				if !c.doClosed {
-					c.cl.Unlock()
-					go c.Close()
-					return
-				}
-			}
-			c.cl.Unlock()
-
-			break
-		}
-
-		if n == len(block) && len(block) < maxDataWrite {
-			block = make([]byte, len(block)*2)
-		}
-
-		if n < len(block)/2 && len(block) > maxDataWrite {
-			block = make([]byte, len(block)/2)
-		}
-	}
-
-	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptRequests", "Completed")
-}
-
-// handleRequest processes data requests coming in from the client's internal
-// connection.
-func (c *Client) handleRequest(data []byte, tx octo.Transmission) error {
-	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptRequests", "Finished")
-
-	return nil
-}
-
-// initClusterNegotiation initiates the negotiation of cluster information.
-func (c *Client) initClusterNegotiation() error {
-	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Cluster Negotiation")
-
-	block := make([]byte, minDataSize)
-
-	c.Send(utils.WrapResponseBlock(consts.ClusterRequest, nil), true)
-
-	dataLen, err := c.conn.Read(block)
-	if err != nil {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Clinet Negotiation : Initialization Failed : %s", err)
-		return err
-	}
-
-	if dataLen == 0 {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Clinet Negotiation : Initialization Failed : %s", ErrInvalidResponse)
-		return ErrInvalidResponse
-	}
-
-	messages, err := utils.BlockParser.Parse(block[:dataLen])
-	if err != nil {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Clinet Negotiation : Initialization Failed : %s", err)
-		return err
-	}
-
-	if len(messages) < 1 {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Clinet Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidResponse)
-		return ErrInvalidResponse
-	}
-
-	if !bytes.Equal(messages[0].Command, consts.ClusterResponse) {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Clinet Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
-		return ErrAuthInvalidResponse
-	}
-
-	var infos []octo.Info
-
-	for _, message := range messages[0].Data {
-		var info octo.Info
-		if err := json.Unmarshal(message, &info); err != nil {
-			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Clinet Negotiation : Initialization Failed : %s", err)
-			return err
-		}
-
-		// If we are matching the same server then skip.
-		if info.SUUID == c.info.SUUID {
-			continue
-		}
-
-		infos = append(infos, info)
-	}
-
-	// c.Send(utils.WrapResponseBlock(consts.ClusterRequest, nil), true)
-
-	c.server.handleClusters(infos)
-
-	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initClusterNegotiation", "Completed")
-	return nil
-}
-
-// initInfoNegotiation intiaites the negotiation of client connections.
-func (c *Client) initInfoNegotiation() error {
-	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation")
-
-	block := make([]byte, minDataSize)
-
-	c.Send(utils.WrapResponseBlock(consts.InfoRequest, nil), true)
-
-	dataLen, err := c.conn.Read(block)
-	if err != nil {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Clinet Negotiation : Initialization Failed : %s", err)
-		return err
-	}
-
-	if dataLen == 0 {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Clinet Negotiation : Initialization Failed : %s", ErrInvalidResponse)
-		return ErrInvalidResponse
-	}
-
-	messages, err := utils.BlockParser.Parse(block[:dataLen])
-	if err != nil {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Clinet Negotiation : Initialization Failed : %s", err)
-		return err
-	}
-
-	if len(messages) < 1 {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Clinet Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidResponse)
-		return ErrInvalidResponse
-	}
-
-	if !bytes.Equal(messages[0].Command, consts.InfoResponse) {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Clinet Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
-		return ErrAuthInvalidResponse
-	}
-
-	var info octo.Info
-
-	infoData := bytes.Join(messages[0].Data, []byte(""))
-	if err := json.Unmarshal(infoData, &info); err != nil {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Clinet Negotiation : Initialization Failed : %s", err)
-		return err
-	}
-
-	c.info = info
-
-	return nil
-}
-
-// initAuthNegotiation intiaites the negotiation of client connections.
-func (c *Client) initAuthNegotiation() error {
-	c.Send(utils.WrapResponseBlock(consts.AuthRequest, nil), true)
-
-	block := make([]byte, minDataSize)
-
-	dataLen, err := c.conn.Read(block)
-	if err != nil {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Clinet Negotiation : Initialization Failed : %s", err)
-		return err
-	}
-
-	if dataLen == 0 {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Clinet Negotiation : Initialization Failed : %s", ErrInvalidResponse)
-		return ErrInvalidResponse
-	}
-
-	messages, err := utils.BlockParser.Parse(block[:dataLen])
-	if err != nil {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Clinet Negotiation : Initialization Failed : %s", err)
-		return err
-	}
-
-	if len(messages) < 1 {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Clinet Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidResponse)
-		return ErrInvalidResponse
-	}
-
-	if !bytes.Equal(messages[0].Command, consts.AuthResponse) {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Clinet Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
-		return ErrAuthInvalidResponse
-	}
-
-	var auth octo.AuthCredential
-
-	authData := bytes.Join(messages[0].Data, []byte(""))
-	if err := json.Unmarshal(authData, &auth); err != nil {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Clinet Negotiation : Initialization Failed : %s", err)
-		return err
-	}
-
-	if err := c.system.Authenticate(auth); err != nil {
-		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Clinet Negotiation : Authentication Failed : %s", err)
-		return err
-	}
-
-	return nil
 }
 
 //================================================================================
@@ -545,18 +606,20 @@ type ServerAttr struct {
 // of the way tcp works.
 type Server struct {
 	ServerAttr
-	running         bool
-	logs            octo.Logs
-	info            octo.Info
-	listener        net.Listener
-	clusterListener net.Listener
-	wg              sync.WaitGroup
-	cg              sync.WaitGroup
-	rl              sync.Mutex
-	clients         []*Client
-	clusters        []*Client
-	clientSystem    octo.System
-	clusterSystem   octo.System
+	running          bool
+	logs             octo.Logs
+	info             octo.Info
+	clusterInfo      octo.Info
+	listener         net.Listener
+	clusterListener  net.Listener
+	wg               sync.WaitGroup
+	cg               sync.WaitGroup
+	rl               sync.Mutex
+	clients          []*Client
+	clusters         []*Client
+	clientSystem     octo.System
+	clusterSystem    *octo.BaseSystem
+	clientBaseSystem *octo.BaseSystem
 }
 
 // NewServer returns a new Server which handles connections from clients and
@@ -564,12 +627,22 @@ type Server struct {
 func NewServer(logs octo.Logs, attr ServerAttr) *Server {
 	suuid := uuid.NewUUID().String()
 
+	// ip, port, _ := net.SplitHostPort(attr.Addr)
+	// if ip == "" || ip == "0.0.0.0"{ ip = ""}
+
 	var s Server
 	s.ServerAttr = attr
 	s.logs = logs
 	s.info = octo.Info{
 		Remote: attr.Addr,
 		Addr:   attr.Addr,
+		UUID:   suuid,
+		SUUID:  suuid,
+	}
+
+	s.clusterInfo = octo.Info{
+		Remote: attr.ClusterAddr,
+		Addr:   attr.ClusterAddr,
 		UUID:   suuid,
 		SUUID:  suuid,
 	}
@@ -633,6 +706,9 @@ func (s *Server) Listen(system octo.System) error {
 		return err
 	}
 
+	// s.info.Addr = s.listener.Addr().String()
+	// s.info.Remote = s.listener.Addr().String()
+
 	s.logs.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.Listen", "New Client Listener : %s", s.listener.Addr())
 
 	if s.ClusterAddr != "" {
@@ -642,6 +718,9 @@ func (s *Server) Listen(system octo.System) error {
 			return err
 		}
 
+		// s.clusterInfo.Addr = s.clusterListener.Addr().String()
+		// s.clusterInfo.Remote = s.clusterListener.Addr().String()
+
 		s.logs.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.Listen", "New Cluster Listener : %s", s.clusterListener.Addr())
 	}
 
@@ -650,6 +729,7 @@ func (s *Server) Listen(system octo.System) error {
 	s.rl.Unlock()
 
 	s.clientSystem = system
+	s.clientBaseSystem = octo.NewBaseSystem(system, octo.BaseHandlers())
 	s.clusterSystem = octo.NewBaseSystem(system, octo.BasicHandlers(s), octo.ClusterHandlers(s))
 
 	if s.clusterListener != nil {
@@ -692,17 +772,18 @@ func (s *Server) RelateWithCluster(addr string) error {
 
 	var client Client
 	client = Client{
-		server: s,
-		conn:   conn,
-		logs:   s.logs,
 		info: octo.Info{
 			Addr:   localAddr,
 			Remote: remoteAddr,
 			UUID:   clientID,
 			SUUID:  s.info.SUUID,
 		},
+		server:              s,
+		conn:                conn,
+		logs:                s.logs,
 		clusterClient:       true,
 		connectionInitiator: true,
+		system:              s.clusterSystem,
 		writer:              bufio.NewWriter(conn),
 	}
 
@@ -720,6 +801,8 @@ func (s *Server) RelateWithCluster(addr string) error {
 
 // Clusters returns all Info related to each registered cluster.
 func (s *Server) Clusters() []octo.Info {
+	s.logs.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Clusters", "Started")
+
 	var infos []octo.Info
 
 	for _, cluster := range s.clusters {
@@ -727,6 +810,7 @@ func (s *Server) Clusters() []octo.Info {
 		infos = append(infos, clusterInfo)
 	}
 
+	s.logs.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Clusters", "Completed")
 	return infos
 }
 
@@ -811,16 +895,17 @@ func (s *Server) handleClientConnections(system octo.System) {
 
 		var client Client
 		client = Client{
-			server: s,
-			conn:   conn,
-			logs:   s.logs,
-			system: system,
 			info: octo.Info{
 				Addr:   localAddr,
 				Remote: remoteAddr,
 				UUID:   clientID,
 				SUUID:  s.info.SUUID,
 			},
+			server:              s,
+			conn:                conn,
+			logs:                s.logs,
+			system:              system,
+			primarySystem:       s.clientBaseSystem,
 			clusterClient:       false,
 			connectionInitiator: false,
 			writer:              bufio.NewWriter(conn),
@@ -857,7 +942,7 @@ func (s *Server) handleClusterConnections(system octo.System) {
 		}
 		s.rl.Unlock()
 
-		conn, err := s.listener.Accept()
+		conn, err := s.clusterListener.Accept()
 		if err != nil {
 			s.logs.Log(octo.LOGERROR, "Server.handleClientConnections", "Error : %s", err.Error())
 			if opError, ok := err.(*net.OpError); ok {
@@ -888,15 +973,15 @@ func (s *Server) handleClusterConnections(system octo.System) {
 
 		var client Client
 		client = Client{
-			server: s,
-			conn:   conn,
-			logs:   s.logs,
 			info: octo.Info{
 				Addr:   localAddr,
 				Remote: remoteAddr,
 				UUID:   clientID,
 				SUUID:  s.info.SUUID,
 			},
+			server:              s,
+			conn:                conn,
+			logs:                s.logs,
 			system:              system,
 			clusterClient:       true,
 			connectionInitiator: false,

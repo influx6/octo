@@ -21,3 +21,11 @@ func (l *Logger) Log(level string, namespace string, function string, message st
 		fmt.Printf("%s : %s : %s : %s\n", level, namespace, function, fmt.Sprintf(message, items...))
 	}
 }
+
+// StdLogger defines a structure that implements the octo.Log interface.
+type StdLogger struct{}
+
+// Log exposes methods to giving logger to the internal testing.T object.
+func (StdLogger) Log(level string, namespace string, function string, message string, items ...interface{}) {
+	fmt.Printf("%s : %s : %s : %s\n", level, namespace, function, fmt.Sprintf(message, items...))
+}

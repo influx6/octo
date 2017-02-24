@@ -1,8 +1,10 @@
 package octo
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/influx6/faux/utils"
@@ -57,6 +59,28 @@ func (b *BaseSystem) Authenticate(auth AuthCredential) error {
 	return nil
 }
 
+// ServeBase handles message requests from a giving server.
+func (b *BaseSystem) ServeBase(data []byte, tx Transmission) (utils.Messages, error) {
+	messages, err := utils.BlockParser.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+
+	var unserved []utils.Message
+
+	for _, message := range messages {
+		if handler, ok := b.handlers[string(message.Command)]; ok {
+			if err := handler(message, tx); err != nil {
+				return nil, err
+			}
+		} else {
+			unserved = append(unserved, message)
+		}
+	}
+
+	return unserved, nil
+}
+
 // Serve handles message requests from a giving server.
 func (b *BaseSystem) Serve(data []byte, tx Transmission) error {
 	messages, err := utils.BlockParser.Parse(data)
@@ -65,7 +89,9 @@ func (b *BaseSystem) Serve(data []byte, tx Transmission) error {
 	}
 
 	for _, message := range messages {
-		if handler, ok := b.handlers[string(message.Command)]; ok {
+		command := strings.ToLower(string(message.Command))
+		fmt.Printf("New Message: %+q\n", message)
+		if handler, ok := b.handlers[command]; ok {
 			if err := handler(message, tx); err != nil {
 				return err
 			}
@@ -95,6 +121,15 @@ func ClusterHandlers(master Clusters) map[string]MessageHandler {
 
 			return tx.Send(utils.WrapResponseBlock(consts.ClusterResponse, parsed), true)
 		},
+		string(consts.InfoResponse): func(m utils.Message, tx Transmission) error {
+			var newInfo Info
+
+			if err := json.Unmarshal(bytes.Join(m.Data, []byte("")), &newInfo); err != nil {
+				return err
+			}
+
+			return tx.Send(utils.WrapResponseBlock(consts.OK, nil), true)
+		},
 	}
 }
 
@@ -110,6 +145,9 @@ func BasicHandlers(credential Credentials) map[string]MessageHandler {
 		"PONG": func(m utils.Message, tx Transmission) error {
 			return tx.Send(utils.WrapResponseBlock([]byte("PING"), nil), true)
 		},
+		"OK": func(m utils.Message, tx Transmission) error {
+			return nil
+		},
 		"PING": func(m utils.Message, tx Transmission) error {
 			return tx.Send(utils.WrapResponseBlock([]byte("PONG"), nil), true)
 		},
@@ -120,6 +158,44 @@ func BasicHandlers(credential Credentials) map[string]MessageHandler {
 			}
 
 			return tx.Send(utils.WrapResponseBlock(consts.AuthResponse, parsed), true)
+		},
+		string(consts.ClientInfoRequest): func(m utils.Message, tx Transmission) error {
+			clientInfo, _ := tx.Info()
+
+			infx, err := json.Marshal(clientInfo)
+			if err != nil {
+				return err
+			}
+
+			return tx.Send(utils.WrapResponseBlock(consts.ClientInfoResponse, infx), true)
+		},
+		string(consts.InfoRequest): func(m utils.Message, tx Transmission) error {
+			_, serverInfo := tx.Info()
+
+			infx, err := json.Marshal(serverInfo)
+			if err != nil {
+				return err
+			}
+
+			return tx.Send(utils.WrapResponseBlock(consts.InfoResponse, infx), true)
+		},
+	}
+}
+
+// BaseHandlers provides a set of MessageHandlers providing common operations/events
+// that can be requested during the operations of a giving request.
+func BaseHandlers() map[string]MessageHandler {
+	return map[string]MessageHandler{
+		"CLOSE": func(m utils.Message, tx Transmission) error {
+			defer tx.Close()
+
+			return tx.Send(utils.WrapResponseBlock([]byte("OK"), nil), true)
+		},
+		"PONG": func(m utils.Message, tx Transmission) error {
+			return tx.Send(utils.WrapResponseBlock([]byte("PING"), nil), true)
+		},
+		"PING": func(m utils.Message, tx Transmission) error {
+			return tx.Send(utils.WrapResponseBlock([]byte("PONG"), nil), true)
 		},
 		string(consts.ClientInfoRequest): func(m utils.Message, tx Transmission) error {
 			clientInfo, _ := tx.Info()
