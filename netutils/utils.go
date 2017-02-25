@@ -489,6 +489,15 @@ func GetInterfaceIPs() ([]net.IP, error) {
 	return localIPs, nil
 }
 
+// CopyUDPAddr returns a new copy of a giving UDPAddr.
+func CopyUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
+	newAddr := new(net.UDPAddr)
+	*newAddr = *addr
+	newAddr.IP = make(net.IP, len(addr.IP))
+	copy(newAddr.IP, addr.IP)
+	return newAddr
+}
+
 // Helper to move from float seconds to time.Duration
 func secondsToDuration(seconds float64) time.Duration {
 	ttl := seconds * float64(time.Second)

@@ -516,7 +516,7 @@ func (c *Client) temporaryRead() ([]byte, error) {
 // SendAll sends the giving data to all clients and clusters the giving
 // set of data.
 func (c *Client) SendAll(data []byte, flush bool) error {
-	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Transmission to All ")
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Started : Transmission to All ")
 
 	if err := c.Send(data, flush); err != nil {
 		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Completed : %+q", err)
@@ -768,9 +768,6 @@ func (s *Server) Listen(system octo.System) error {
 		return err
 	}
 
-	// s.info.Addr = s.listener.Addr().String()
-	// s.info.Remote = s.listener.Addr().String()
-
 	s.logs.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.Listen", "New Client Listener : %s", s.listener.Addr())
 
 	if s.ClusterAddr != "" {
@@ -792,7 +789,7 @@ func (s *Server) Listen(system octo.System) error {
 
 	s.clientSystem = system
 	s.clientBaseSystem = octo.NewBaseSystem(system, octo.BaseHandlers())
-	s.clusterSystem = octo.NewBaseSystem(system, octo.BasicHandlers(s), octo.ClusterHandlers(s))
+	s.clusterSystem = octo.NewBaseSystem(system, octo.AuthHandlers(s), octo.ClusterHandlers(s))
 
 	if s.clusterListener != nil {
 		s.wg.Add(2)

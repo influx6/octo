@@ -1,4 +1,4 @@
-package mock
+package TCPConnClient
 
 import (
 	"bufio"
@@ -10,16 +10,16 @@ import (
 	"github.com/influx6/octo/netutils"
 )
 
-// TCPClient defines a interface for a type which connects to
+// TCPConnClient defines a interface for a type which connects to
 // a tcp endpoint and provides read and write capabilities.
-type TCPClient struct {
-	conn   net.Conn
+type TCPConnClient struct {
+	net.Conn
 	writer *bufio.Writer
 	reader *bufio.Reader
 }
 
-// NewTCPClient returns a new instance of a TCPClient.
-func NewTCPClient(addr string) (*TCPClient, error) {
+// NewTCPConnClient returns a new instance of a TCPConnClient.
+func NewTCPConnClient(addr string) (*TCPConnClient, error) {
 	ip, port, _ := net.SplitHostPort(addr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -32,23 +32,23 @@ func NewTCPClient(addr string) (*TCPClient, error) {
 		return nil, err
 	}
 
-	return &TCPClient{
-		conn:   conn,
+	return &TCPConnClient{
+		Conn:   conn,
 		writer: bufio.NewWriter(conn),
 		reader: bufio.NewReader(conn),
 	}, nil
 }
 
 // Write writes the current available data from the pipeline.
-func (t *TCPClient) Write(data []byte, flush bool) error {
-	if t.conn == nil {
+func (t *TCPConnClient) Write(data []byte, flush bool) error {
+	if t.Conn == nil {
 		return ErrClosedConnection
 	}
 
 	var deadline bool
 
 	if t.writer.Available() < len(data) {
-		t.conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+		t.Conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
 		deadline = true
 	}
 
@@ -58,7 +58,7 @@ func (t *TCPClient) Write(data []byte, flush bool) error {
 	}
 
 	if deadline {
-		t.conn.SetWriteDeadline(time.Time{})
+		t.Conn.SetWriteDeadline(time.Time{})
 	}
 
 	return err
@@ -66,13 +66,13 @@ func (t *TCPClient) Write(data []byte, flush bool) error {
 
 // Close ends and disposes of the internal connection, closing it and
 // all reads and writers.
-func (t *TCPClient) Close() error {
-	if t.conn == nil {
+func (t *TCPConnClient) Close() error {
+	if t.Conn == nil {
 		return nil
 	}
 
-	err := t.conn.Close()
-	t.conn = nil
+	err := t.Conn.Close()
+	t.Conn = nil
 	t.writer = nil
 	t.reader = nil
 	return err
@@ -83,22 +83,17 @@ func (t *TCPClient) Close() error {
 var ErrClosedConnection = errors.New("Connection Closed")
 
 // Read reads the current available data from the pipeline.
-func (t *TCPClient) Read() ([]byte, error) {
-	if t.conn == nil {
+func (t *TCPConnClient) Read() ([]byte, error) {
+	if t.Conn == nil {
 		return nil, ErrClosedConnection
 	}
 
-	// t.conn.SetReadDeadline(time.Now().Add(4 * time.Second))
-
-	block := make([]byte, 6085)
+	block := make([]byte, 512)
 
 	n, err := t.reader.Read(block)
 	if err != nil {
-		t.conn.SetReadDeadline(time.Time{})
 		return nil, err
 	}
-
-	// t.conn.SetReadDeadline(time.Time{})
 
 	return block[:n], nil
 }

@@ -57,7 +57,7 @@ func (b *BaseSystem) Authenticate(auth AuthCredential) error {
 	return nil
 }
 
-// ServeBase handles message requests from a giving server.
+// ServeBase handles message received and returns messages slice it can not handle.
 func (b *BaseSystem) ServeBase(data []byte, tx Transmission) (utils.Messages, error) {
 	messages, err := utils.BlockParser.Parse(data)
 	if err != nil {
@@ -79,7 +79,8 @@ func (b *BaseSystem) ServeBase(data []byte, tx Transmission) (utils.Messages, er
 	return unserved, nil
 }
 
-// Serve handles message requests from a giving server.
+// Serve handles message requests recieved and retuns an error on a message it cant
+// handle.
 func (b *BaseSystem) Serve(data []byte, tx Transmission) error {
 	messages, err := utils.BlockParser.Parse(data)
 	if err != nil {
@@ -127,24 +128,10 @@ func ClusterHandlers(master Clusters) map[string]MessageHandler {
 	}
 }
 
-// BasicHandlers provides a set of MessageHandlers providing common operations/events
-// that can be requested during the operations of a giving request.
-func BasicHandlers(credential Credentials) map[string]MessageHandler {
+// AuthHandlers provides a MessageHandlers providing auth operations/events
+// handling.
+func AuthHandlers(credential Credentials) map[string]MessageHandler {
 	return map[string]MessageHandler{
-		"CLOSE": func(m utils.Message, tx Transmission) error {
-			defer tx.Close()
-
-			return tx.Send(utils.WrapResponseBlock([]byte("OK"), nil), true)
-		},
-		"PONG": func(m utils.Message, tx Transmission) error {
-			return tx.Send(utils.WrapResponseBlock([]byte("PING"), nil), true)
-		},
-		"OK": func(m utils.Message, tx Transmission) error {
-			return nil
-		},
-		"PING": func(m utils.Message, tx Transmission) error {
-			return tx.Send(utils.WrapResponseBlock([]byte("PONG"), nil), true)
-		},
 		string(consts.AuthRequest): func(m utils.Message, tx Transmission) error {
 			parsed, err := json.Marshal(credential.Credential())
 			if err != nil {
@@ -152,26 +139,6 @@ func BasicHandlers(credential Credentials) map[string]MessageHandler {
 			}
 
 			return tx.Send(utils.WrapResponseBlock(consts.AuthResponse, parsed), true)
-		},
-		string(consts.ClientInfoRequest): func(m utils.Message, tx Transmission) error {
-			clientInfo, _ := tx.Info()
-
-			infx, err := json.Marshal(clientInfo)
-			if err != nil {
-				return err
-			}
-
-			return tx.Send(utils.WrapResponseBlock(consts.ClientInfoResponse, infx), true)
-		},
-		string(consts.InfoRequest): func(m utils.Message, tx Transmission) error {
-			_, serverInfo := tx.Info()
-
-			infx, err := json.Marshal(serverInfo)
-			if err != nil {
-				return err
-			}
-
-			return tx.Send(utils.WrapResponseBlock(consts.InfoResponse, infx), true)
 		},
 	}
 }

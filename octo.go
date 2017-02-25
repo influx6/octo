@@ -1,7 +1,11 @@
 package octo
 
 import (
+	"encoding/json"
+
 	"github.com/influx6/faux/context"
+	"github.com/influx6/faux/utils"
+	"github.com/influx6/octo/consts"
 )
 
 // Contains sets of log levels usable in logging operation details.
@@ -87,6 +91,17 @@ type AuthCredential struct {
 	Data   []byte `json:"data"`
 }
 
+// TCPResponse returns the giving response expected by the tcp server when request
+// authentication response.
+func (ac AuthCredential) TCPResponse() ([]byte, error) {
+	data, err := json.Marshal(ac)
+	if err != nil {
+		return nil, err
+	}
+
+	return utils.MakeByteMessage(consts.AuthResponse, data), nil
+}
+
 // Credentials defines a type which exposes a method to return the credentials
 // for the giving entity.
 type Credentials interface {
@@ -103,10 +118,18 @@ type Transmission interface {
 	SendAll(data []byte, flush bool) error
 }
 
-// Transmit defines a structure which is used to deliver
+// ReceivedTransmit defines a structure which is used to deliver
 // specific data from a giving System with the Transmission
 // through which it responds.
-type Transmit struct {
+type ReceivedTransmit struct {
+	Data []byte
+	UUID string
+}
+
+// SentTransmit defines a structure which is used to deliver
+// specific data from a giving System with the Transmission
+// through which it responds.
+type SentTransmit struct {
 	Data []byte
 	UUID string
 }
