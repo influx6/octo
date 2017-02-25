@@ -50,8 +50,8 @@ type Server struct {
 	clients []Client
 }
 
-// NewServer returns a new instance of the UDP server.
-func NewServer(log octo.Logs, attr ServerAttr) *Server {
+// New returns a new instance of the UDP server.
+func New(log octo.Logs, attr ServerAttr) *Server {
 	var s Server
 	s.log = log
 	s.Attr = attr
@@ -273,11 +273,11 @@ func (s *Server) handleConnections(system octo.System) {
 		n, addr, err := s.conn.ReadFromUDP(block)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "ReadTimeout")
+				// c.logs.Log(octo.LOGERROR, c.info.UUID, "udp.Client.acceptRequests", "ReadTimeout")
 				continue
 			}
 
-			s.log.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.handleConnections", "Read Error : %+s", err)
+			s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "Read Error : %+s", err)
 
 			// TODO: Do we wish to break here or continue?
 			// break
@@ -292,16 +292,16 @@ func (s *Server) handleConnections(system octo.System) {
 
 			rem, err := s.base.ServeBase(data, tx)
 			if err != nil {
-				s.log.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+				s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
 
 				if err := s.system.Serve(data, tx); err != nil {
-					s.log.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+					s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
 				}
 			}
 
 			// Handle remaining messages and pass it to user system.
 			if err := s.system.Serve(utils.JoinMessages(rem...), tx); err != nil {
-				s.log.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+				s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
 			}
 		}(block[:n], s.retrieveOrAdd(addr))
 
@@ -336,35 +336,43 @@ type Client struct {
 
 // Send delivers the message to the giving addr associated with the client.
 func (c *Client) Send(data []byte, flush bool) error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Send", "Started")
+	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Send", "Started")
 
-	if _, err := c.conn.WriteToUDP(data, c.addr); err != nil {
-		c.log.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Send", "Completed : %s", err.Error())
+	c.log.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Started : %+q", data)
+	_, err := c.conn.WriteToUDP(data, c.addr)
+	c.log.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Ended")
+
+	if err != nil {
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.Send", "Completed : %s", err.Error())
 		return err
 	}
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Send", "Completed")
+	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Send", "Completed")
 	return nil
 }
 
 // SendAll delivers the message to the giving addr associated with the client.
 func (c *Client) SendAll(data []byte, flush bool) error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Started")
+	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.SendAll", "Started")
 
 	if err := c.Send(data, flush); err != nil {
-		c.log.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Completed : %s", err.Error())
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.SendAll", "Completed : %s", err.Error())
 		return err
 	}
 
 	clients := c.server.getClients()
 
 	for _, client := range clients {
+		if client.addr.IP.Equal(c.addr.IP) && client.addr.Port == c.addr.Port {
+			continue
+		}
+
 		if _, err := c.conn.WriteToUDP(data, client.addr); err != nil {
-			c.log.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Completed : Client{UUID: %s, Addr: %+s} : %s", client.info.UUID, client.addr.String(), err.Error())
+			c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.SendAll", "Completed : Client{UUID: %s, Addr: %+s} : %s", client.info.UUID, client.addr.String(), err.Error())
 		}
 	}
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Completed")
+	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.SendAll", "Completed")
 	return nil
 }
 

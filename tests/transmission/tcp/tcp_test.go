@@ -39,7 +39,7 @@ func TestServer(t *testing.T) {
 		},
 	})
 
-	server := tcp.NewServer(log, tcp.ServerAttr{
+	server := tcp.New(log, tcp.ServerAttr{
 		Addr: ":6050",
 		// ClusterAddr: ":6060",
 	})
@@ -136,12 +136,12 @@ func TestClustereServers(t *testing.T) {
 		},
 	})
 
-	server := tcp.NewServer(log, tcp.ServerAttr{
+	server := tcp.New(log, tcp.ServerAttr{
 		Addr:        ":6050",
 		ClusterAddr: ":6060",
 	})
 
-	server2 := tcp.NewServer(log, tcp.ServerAttr{
+	server2 := tcp.New(log, tcp.ServerAttr{
 		Addr:        ":7050",
 		ClusterAddr: ":7060",
 	})

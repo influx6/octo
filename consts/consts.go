@@ -25,6 +25,7 @@ const (
 	MinDataSize      = 512
 	MaxConnections   = (64 * 1024)
 	MaxPayload       = (1024 * 1024)
+	MaxBufferSize    = (2 * 1024)
 	MaxDataWrite     = 6048
 )
 

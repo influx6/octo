@@ -524,6 +524,10 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 	}
 
 	for _, cu := range c.server.clients {
+		if cu == c {
+			continue
+		}
+
 		if err := cu.Send(data, flush); err != nil {
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Unable to deliver for %+q : %+q", cu.info, err)
 		}
@@ -637,9 +641,9 @@ type Server struct {
 	running          bool
 }
 
-// NewServer returns a new Server which handles connections from clients and
+// New returns a new Server which handles connections from clients and
 // clusters if allowed.
-func NewServer(logs octo.Logs, attr ServerAttr) *Server {
+func New(logs octo.Logs, attr ServerAttr) *Server {
 	suuid := uuid.NewUUID().String()
 
 	ip, port, _ := net.SplitHostPort(attr.Addr)
