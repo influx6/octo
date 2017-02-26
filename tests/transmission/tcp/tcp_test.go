@@ -197,8 +197,8 @@ func TestClusterServerSendAll(t *testing.T) {
 	}
 	tests.Passed(t, "Should have successfully connected with cluster.")
 
-	// defer server2.Close()
-	// defer server.Close()
+	defer server2.Close()
+	defer server.Close()
 
 	client, err := mock.NewTCPClient(":6050")
 	if err != nil {
@@ -212,8 +212,8 @@ func TestClusterServerSendAll(t *testing.T) {
 	}
 	tests.Passed(t, "Should have successfully connected to host server ':4050'.")
 
-	// defer client.Close()
-	// defer client2.Close()
+	defer client.Close()
+	defer client2.Close()
 
 	t.Logf("\tWhen 'BULL' is mass sent to the server")
 	{

@@ -170,7 +170,6 @@ func ClusterHandlers(master Clusters, handler ClusterHandler, sendMessage func([
 			return tx.Send(utils.MakeByteMessage(consts.ClusterRequest, nil), true)
 		},
 		string(consts.ClusterDistRequest): func(m utils.Message, tx Transmission) error {
-			fmt.Printf("Received New Distribution: %+q\n", m)
 			dataLen := len(m.Data)
 			if dataLen > 1 || dataLen == 0 {
 				return errors.New("Cluster distribution expects at most a single element in the data list of a Message")
@@ -180,7 +179,6 @@ func ClusterHandlers(master Clusters, handler ClusterHandler, sendMessage func([
 			realData = bytes.TrimPrefix(realData, []byte("("))
 			realData = bytes.TrimSuffix(realData, []byte(")"))
 
-			fmt.Printf("Received New Distribution: RLDATA : %+q\n", m)
 			if sendMessage == nil {
 				return errors.New("Cluster distribution expects a message function to be provided")
 			}
