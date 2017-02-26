@@ -642,7 +642,7 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Cluster Delivery : %+q : Total %d", realData, len(clusters))
 
 	for _, cu := range clusters {
-		c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Data Delivery : %+q : %+q", realData, cu.info.UUID, cu.info.Addr)
+		c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Data Delivery : %+q : %+q : %+q", realData, cu.info.UUID, cu.info.Addr)
 
 		if err := cu.Send(realData, flush); err != nil {
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Unable to deliver for %+q : %+q", cu.info, err)
