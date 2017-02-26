@@ -14,6 +14,7 @@ const (
 
 // contains a giving set of constants for usage in other packages.
 const (
+	ReadTimeout      = 7 * time.Second
 	MinTempSleep     = 10 * time.Millisecond
 	MaxSleepTime     = 2 * time.Second
 	MinSleepTime     = 10 * time.Millisecond

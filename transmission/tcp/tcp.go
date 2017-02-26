@@ -76,8 +76,8 @@ func (t *Transmission) Close() error {
 type Client struct {
 	clusterClient       bool
 	connectionInitiator bool
-	closed              bool
-	doClosed            bool
+	running             bool
+	doClose             bool
 	logs                octo.Logs
 	conn                net.Conn
 	info                octo.Info
@@ -120,16 +120,16 @@ func (c *Client) Close() error {
 	c.sendg.Wait()
 
 	c.cl.Lock()
-	c.closed = true
-	c.doClosed = true
+	c.running = false
+	c.doClose = true
 	c.cl.Unlock()
+
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Close", "Waiting for all acceptRequests to End")
+	c.wg.Wait()
 
 	if err := c.conn.Close(); err != nil {
 		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Close", "Completed : %s", err)
 	}
-
-	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Close", "Waiting for all acceptRequests to End")
-	c.wg.Wait()
 
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Close", "Completed")
 	return nil
@@ -192,7 +192,12 @@ var ErrAuthInvalidResponse = errors.New("Invalid Response")
 
 // Listen calls the client to begin listening for connection requests.
 func (c *Client) Listen() error {
-	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Listen", "New Client Listen: %+q", c.info)
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Listen", "Started : Client Listen: %+q", c.info)
+
+	if c.IsRunning() {
+		c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Listen", "Completed")
+		return nil
+	}
 
 	if c.server.ServerAttr.TLS != nil {
 		if err := c.transformTLS(); err != nil {
@@ -200,6 +205,12 @@ func (c *Client) Listen() error {
 			return err
 		}
 	}
+
+	c.cl.Lock()
+	{
+		c.running = true
+	}
+	c.cl.Unlock()
 
 	// If we are a clusterClient then attempt to exchange information with new cluster.
 	if c.clusterClient {
@@ -242,7 +253,14 @@ func (c *Client) Listen() error {
 func (c *Client) IsRunning() bool {
 	c.cl.Lock()
 	defer c.cl.Unlock()
-	return !c.closed
+	return c.running
+}
+
+// shouldClose returns true/false if a client is requested to close.
+func (c *Client) shouldClose() bool {
+	c.cl.Lock()
+	defer c.cl.Unlock()
+	return c.doClose
 }
 
 // acceptRequests beings listening for messages from the giving connection.
@@ -260,7 +278,7 @@ func (c *Client) acceptRequests() {
 			}
 		}
 
-		// c.conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+		c.conn.SetReadDeadline(time.Now().Add(consts.ReadTimeout))
 
 		n, err := c.conn.Read(block)
 		if err != nil {
@@ -270,37 +288,16 @@ func (c *Client) acceptRequests() {
 			}
 
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "Read Error : %+s", err)
-			// c.conn.SetReadDeadline(time.Time{})
-
-			c.cl.Lock()
-			{
-				if !c.doClosed {
-					c.cl.Unlock()
-					go c.Close()
-					return
-				}
-			}
-			c.cl.Unlock()
+			c.conn.SetReadDeadline(time.Time{})
 
 			break
 		}
 
-		// c.conn.SetReadDeadline(time.Time{})
+		c.conn.SetReadDeadline(time.Time{})
 
 		c.logs.Log(octo.LOGTRANSMITTED, c.info.UUID, "tcp.Client.acceptRequests", "Transmitted : %+q", block[:n])
 		if err := c.handleRequest(block[:n], c.Transmission()); err != nil {
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "Read Error : %+s", err)
-
-			c.cl.Lock()
-			{
-				if !c.doClosed {
-					c.cl.Unlock()
-					go c.Close()
-					return
-				}
-			}
-			c.cl.Unlock()
-
 			break
 		}
 
@@ -310,6 +307,10 @@ func (c *Client) acceptRequests() {
 
 		if n < len(block)/2 && len(block) > maxDataWrite {
 			block = make([]byte, len(block)/2)
+		}
+
+		if c.shouldClose() {
+			break
 		}
 	}
 
@@ -583,21 +584,18 @@ func (c *Client) temporaryRead() ([]byte, error) {
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.temporaryRead", "Started")
 	block := make([]byte, minDataSize)
 
-	for {
-		c.cl.Lock()
-		if c.closed {
-			c.cl.Unlock()
-			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.temporaryRead", "Client Negotiation : %+q", consts.ErrConnClosed)
-			return nil, consts.ErrConnClosed
-		}
-		c.cl.Unlock()
-
+	for c.IsRunning() {
 		c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
 		dataLen, err := c.conn.Read(block)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.temporaryRead", "Client Negotiation : ReadTimeout")
 				continue
+			}
+
+			if c.shouldClose() {
+				break
 			}
 
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
@@ -1256,7 +1254,7 @@ func (s *Server) handleClusterConnections(system octo.System) {
 
 		conn, err := s.clusterListener.Accept()
 		if err != nil {
-			s.logs.Log(octo.LOGERROR, "Server.handleClusterConnections", "Error : %s", err.Error())
+			s.logs.Log(octo.LOGERROR, s.info.UUID, "Server.handleClusterConnections", "Error : %s", err.Error())
 			if opError, ok := err.(*net.OpError); ok {
 				if opError.Op == "accept" {
 					break
@@ -1264,7 +1262,7 @@ func (s *Server) handleClusterConnections(system octo.System) {
 			}
 
 			if tmpError, ok := err.(net.Error); ok && tmpError.Temporary() {
-				s.logs.Log(octo.LOGERROR, "Server.handleClusterConnections", "Temporary Error : %s : Sleeping %dms", err.Error(), sleepTime/time.Millisecond)
+				s.logs.Log(octo.LOGERROR, s.info.UUID, "Server.handleClusterConnections", "Temporary Error : %s : Sleeping %dms", err.Error(), sleepTime/time.Millisecond)
 				time.Sleep(sleepTime)
 				sleepTime *= 2
 				if sleepTime > maxSleepTime {
