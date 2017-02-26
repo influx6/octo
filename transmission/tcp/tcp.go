@@ -1154,7 +1154,7 @@ func (s *Server) handleClientConnections(system octo.System) {
 
 		conn, err := s.listener.Accept()
 		if err != nil {
-			s.logs.Log(octo.LOGERROR, "Server.handleClientConnections", "Error : %s", err.Error())
+			s.logs.Log(octo.LOGERROR, s.info.UUID, "Server.handleClientConnections", "Error : %s", err.Error())
 			if opError, ok := err.(*net.OpError); ok {
 				if opError.Op == "accept" {
 					break
@@ -1162,7 +1162,7 @@ func (s *Server) handleClientConnections(system octo.System) {
 			}
 
 			if tmpError, ok := err.(net.Error); ok && tmpError.Temporary() {
-				s.logs.Log(octo.LOGERROR, "Server.handleClientConnections", "Temporary Error : %s : Sleeping %dms", err.Error(), sleepTime/time.Millisecond)
+				s.logs.Log(octo.LOGERROR, s.info.UUID, "Server.handleClientConnections", "Temporary Error : %s : Sleeping %dms", err.Error(), sleepTime/time.Millisecond)
 				time.Sleep(sleepTime)
 				sleepTime *= 2
 				if sleepTime > maxSleepTime {
