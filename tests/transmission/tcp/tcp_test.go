@@ -169,6 +169,70 @@ func TestClustereServers(t *testing.T) {
 	tests.Passed(t, "Should have successfully added server.UUID cluter to server2 cluster list.")
 }
 
+// TestClusterServerSendAll tests the validity of our server code.
+func TestClusterServerSendAll(t *testing.T) {
+	log := mock.NewLogger(t)
+	system := mock.NewMSystem(map[string]mock.MessageHandler{
+		"BULL": func(m utils.Message, tx octo.Transmission) error {
+			data := utils.WrapResponseBlock([]byte("PRINT"), bytes.Join(m.Data, []byte("")))
+			return tx.SendAll(data, true)
+		},
+	})
+
+	server := tcp.New(log, tcp.ServerAttr{
+		Addr:        ":6050",
+		ClusterAddr: ":6060",
+	})
+
+	server2 := tcp.New(log, tcp.ServerAttr{
+		Addr:        ":7050",
+		ClusterAddr: ":7060",
+	})
+
+	server.Listen(system)
+	server2.Listen(system)
+
+	if err := server2.RelateWithCluster(":6060"); err != nil {
+		tests.Failed(t, "Should have successfully connected with cluster: %s.", err)
+	}
+	tests.Passed(t, "Should have successfully connected with cluster.")
+
+	// defer server2.Close()
+	// defer server.Close()
+
+	client, err := mock.NewTCPClient(":6050")
+	if err != nil {
+		tests.Failed(t, "Should have successfully connected to host server ':4050': %s.", err)
+	}
+	tests.Passed(t, "Should have successfully connected to host server ':4050'.")
+
+	client2, err := mock.NewTCPClient(":7050")
+	if err != nil {
+		tests.Failed(t, "Should have successfully connected to host server ':4050': %s.", err)
+	}
+	tests.Passed(t, "Should have successfully connected to host server ':4050'.")
+
+	// defer client.Close()
+	// defer client2.Close()
+
+	t.Logf("\tWhen 'BULL' is mass sent to the server")
+	{
+		if errx := client.Write(utils.WrapResponseBlock([]byte("BULL"), []byte("LOTTER")), true); err != nil {
+			tests.Failed(t, "Should have delivered 'PING' message: %s.", errx)
+		}
+		tests.Passed(t, "Should have delivered 'PING' message.")
+
+		response, errm := client2.Read()
+		if errm != nil {
+			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+		}
+		tests.Passed(t, "Should have successfully received response from server.")
+
+		validateResponseHeader(t, response, []byte("PRINT"))
+		validateResponse(t, response, []byte("LOTTER"))
+	}
+}
+
 func validateResponseHeader(t *testing.T, data []byte, target []byte) {
 	receivedMessages, err := utils.BlockParser.Parse(data)
 	if err != nil {
@@ -182,6 +246,24 @@ func validateResponseHeader(t *testing.T, data []byte, target []byte) {
 	tests.Passed(t, "Should have successfully received atleast 1 response from server.")
 
 	if !bytes.Equal(receivedMessages[0].Command, target) {
+		tests.Failed(t, "Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Command)
+	}
+	tests.Passed(t, "Should have successfully matched response header as %+q.", target)
+}
+
+func validateResponse(t *testing.T, data []byte, target []byte) {
+	receivedMessages, err := utils.BlockParser.Parse(data)
+	if err != nil {
+		tests.Failed(t, "Should have successfully parsed response from server: %s.", err)
+	}
+	tests.Passed(t, "Should have successfully parsed response from server.")
+
+	if len(receivedMessages) < 1 {
+		tests.Failed(t, "Should have successfully received atleast 1 response from server: %s.", err)
+	}
+	tests.Passed(t, "Should have successfully received atleast 1 response from server.")
+
+	if !bytes.Equal(bytes.Join(receivedMessages[0].Data, []byte("")), target) {
 		tests.Failed(t, "Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Command)
 	}
 	tests.Passed(t, "Should have successfully matched response header as %+q.", target)

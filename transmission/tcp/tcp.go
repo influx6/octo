@@ -624,7 +624,7 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 		return err
 	}
 
-	for _, cu := range c.server.clients {
+	for _, cu := range c.server.ClientList() {
 		if cu == c {
 			continue
 		}
@@ -638,7 +638,12 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 	// '()' character to safeguard the original message.
 	realData := utils.MakeMessage(string(consts.ClusterDistRequest), fmt.Sprintf("(%+s)", data))
 
-	for _, cu := range c.server.clusters {
+	clusters := c.server.ClusterList()
+	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Cluster Delivery : %+q : Total %d", realData, len(clusters))
+
+	for _, cu := range clusters {
+		c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Data Delivery : %+q : %+q", realData, cu.info.UUID, cu.info.Addr)
+
 		if err := cu.Send(realData, flush); err != nil {
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Unable to deliver for %+q : %+q", cu.info, err)
 		}
@@ -987,6 +992,20 @@ func (s *Server) RelateWithCluster(addr string) error {
 
 	s.logs.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.RelateWithCluster", "Completed")
 	return nil
+}
+
+// ClientList returns the slice of clients.
+func (s *Server) ClientList() []*Client {
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+	return s.clients[0:]
+}
+
+// ClusterList returns the slice of clusters clients.
+func (s *Server) ClusterList() []*Client {
+	s.clusterLock.Lock()
+	defer s.clusterLock.Unlock()
+	return s.clusters[0:]
 }
 
 // Clusters returns all Info related to each registered cluster.
