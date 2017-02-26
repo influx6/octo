@@ -81,6 +81,7 @@ type Info struct {
 	SUUID  string `json:"suuid"`
 	Addr   string `json:"addr"`
 	Remote string `json:"remote"`
+	Local  string `json:"local"`
 }
 
 // AuthCredential defines a struct which holds credentails related to

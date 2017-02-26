@@ -21,10 +21,15 @@ func main() {
 	})
 
 	server := tcp.New(mock.StdLogger{}, tcp.ServerAttr{
-		Addr:        ":6050",
-		ClusterAddr: ":6060",
+		Addr:        ":8050",
+		ClusterAddr: ":8060",
 	})
 
 	server.Listen(system)
+
+	if err := server.RelateWithCluster(":6060"); err != nil {
+		panic(err)
+	}
+
 	server.Wait()
 }

@@ -47,6 +47,8 @@ var (
 	AuthResponse       = []byte("AUTHCRED")
 	ClusterRequest     = []byte("CLUSTERS")
 	ClusterResponse    = []byte("CLUSTERRES")
+	ClusterDistRequest = []byte("CLUSTERDISTRI")
+	ClusterPostOK      = []byte("CLUSTERSOK")
 	OK                 = []byte("OK")
 )
 

@@ -1,3 +1,6 @@
+// Package udp provides a simple package that implements a udp protocol
+// transmission for the octo.TranmissionProtocol interface. Which allows a uniform
+// response cycle with a udp based connection either for single/multicast connections.
 package udp
 
 import (
@@ -9,7 +12,7 @@ import (
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
-	"github.com/pborman/uuid"
+	uuid "github.com/satori/go.uuid"
 )
 
 // Version determines the ip type used for generating the udp ip.
@@ -63,7 +66,7 @@ func New(log octo.Logs, attr ServerAttr) *Server {
 		}
 	}
 
-	suuid := uuid.NewUUID().String()
+	suuid := uuid.NewV4().String()
 	s.info = octo.Info{
 		Addr:   attr.Addr,
 		Remote: attr.Addr,
@@ -210,7 +213,7 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 	}
 	s.cl.Unlock()
 
-	cuuid := uuid.NewUUID().String()
+	cuuid := uuid.NewV4().String()
 
 	info := octo.Info{
 		Addr:   addr.IP.String(),

@@ -14,18 +14,13 @@ func (authenticator) Authenticate(auth octo.AuthCredential) error {
 }
 
 func main() {
-	system := octo.NewBaseSystem(authenticator{}, map[string]octo.MessageHandler{
-		"CLOSE": func(m utils.Message, tx octo.Transmission) error {
-			defer tx.Close()
-
-			return tx.Send(utils.WrapResponseBlock([]byte("OK"), nil), true)
-		},
+	system := octo.NewBaseSystem(authenticator{}, mock.StdLogger{}, map[string]octo.MessageHandler{
 		"POP": func(m utils.Message, tx octo.Transmission) error {
 			return tx.Send(utils.WrapResponseBlock([]byte("PUSH"), nil), true)
 		},
 	})
 
-	server := tcp.NewServer(mock.StdLogger{}, tcp.ServerAttr{
+	server := tcp.New(mock.StdLogger{}, tcp.ServerAttr{
 		Addr:        ":7050",
 		ClusterAddr: ":7060",
 	})
