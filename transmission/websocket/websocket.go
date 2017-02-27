@@ -13,10 +13,12 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/influx6/faux/context"
-	"github.com/influx6/faux/utils"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
+	"github.com/influx6/octo/parsers/byteutils"
+	"github.com/influx6/octo/parsers/jsonparser"
+	"github.com/influx6/octo/systems/jsonsystem"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -99,7 +101,7 @@ func (s *SocketServer) Listen(system octo.System) error {
 	}
 
 	s.system = system
-	s.base = octo.NewBaseSystem(system, s.log, octo.BaseHandlers())
+	s.base = octo.NewBaseSystem(system, jsonparser.JSON, s.log, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(s))
 
 	server, tlListener, err := netutils.NewHTTPServer(listener, s, s.Attr.TLSConfig)
 	if err != nil {
@@ -118,6 +120,11 @@ func (s *SocketServer) Listen(system octo.System) error {
 
 	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Completed")
 	return nil
+}
+
+// Credential returns the crendentials for the giving server.
+func (s *SocketServer) Credential() octo.AuthCredential {
+	return s.Attr.Credential
 }
 
 // Clients returns the clients list of the socketServer.
@@ -379,7 +386,7 @@ func (c *Client) acceptRequests() {
 		}
 
 		// Handle remaining messages and pass it to user system.
-		if err := c.system.Serve(utils.JoinMessages(rem...), &tx); err != nil {
+		if err := c.system.Serve(byteutils.JoinMessages(rem...), &tx); err != nil {
 			c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
 		}
 

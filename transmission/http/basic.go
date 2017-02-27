@@ -11,10 +11,12 @@ import (
 	"sync"
 
 	"github.com/influx6/faux/context"
-	"github.com/influx6/faux/utils"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
+	"github.com/influx6/octo/parsers/byteutils"
+	"github.com/influx6/octo/parsers/jsonparser"
+	"github.com/influx6/octo/systems/jsonsystem"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -67,8 +69,8 @@ func New(attr PushAttr) *BasicServer {
 	return &ws
 }
 
-// Credentials return the giving credentails of the provided server.
-func (s *BasicServer) Credentials() octo.AuthCredential {
+// Credential return the giving credentails of the provided server.
+func (s *BasicServer) Credential() octo.AuthCredential {
 	return s.Attr.Credential
 }
 
@@ -94,7 +96,7 @@ func (s *BasicServer) Listen(system octo.System) error {
 	}
 
 	s.system = system
-	s.primary = octo.NewBaseSystem(system, s.log, octo.BaseHandlers())
+	s.primary = octo.NewBaseSystem(system, jsonparser.JSON, s.log, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(s))
 
 	s.rl.Lock()
 	{
@@ -151,7 +153,7 @@ func (s *BasicServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle remaining messages and pass it to user system.
-	if err := s.system.Serve(utils.JoinMessages(rem...), &basic); err != nil {
+	if err := s.system.Serve(byteutils.JoinMessages(rem...), &basic); err != nil {
 		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "BasicServer System : Fails Parsing : Error : %+s", err)
 	}
 

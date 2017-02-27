@@ -11,10 +11,12 @@ import (
 	"sync"
 
 	"github.com/influx6/faux/context"
-	"github.com/influx6/faux/utils"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
+	"github.com/influx6/octo/parsers/byteutils"
+	"github.com/influx6/octo/parsers/jsonparser"
+	"github.com/influx6/octo/systems/jsonsystem"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -94,7 +96,7 @@ func (s *PushServer) Listen(system octo.System) error {
 	}
 
 	s.system = system
-	s.primary = octo.NewBaseSystem(system, s.log, octo.BaseHandlers())
+	s.primary = octo.NewBaseSystem(system, jsonparser.JSON, s.log, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(s))
 
 	s.rl.Lock()
 	{
@@ -158,11 +160,16 @@ func (s *PushServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle remaining messages and pass it to user system.
-	if err := s.system.Serve(utils.JoinMessages(rem...), &pusher); err != nil {
+	if err := s.system.Serve(byteutils.JoinMessages(rem...), &pusher); err != nil {
 		s.log.Log(octo.LOGERROR, s.info.UUID, "httppush.PushServer.ServeHTTP", "PushServer System : Fails Parsing : Error : %+s", err)
 	}
 
 	s.log.Log(octo.LOGINFO, s.info.UUID, "httppush.PushServer.ServeHTTP", "Completed")
+}
+
+// Credential returns the crendentials for the giving server.
+func (s *PushServer) Credential() octo.AuthCredential {
+	return s.Attr.Credential
 }
 
 // Close ends the websocket connection and ensures all requests are finished.
