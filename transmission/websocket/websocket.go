@@ -99,7 +99,7 @@ func (s *SocketServer) Listen(system octo.System) error {
 	}
 
 	s.system = system
-	s.base = octo.NewBaseSystem(system, octo.BaseHandlers())
+	s.base = octo.NewBaseSystem(system, s.log, octo.BaseHandlers())
 
 	server, tlListener, err := netutils.NewHTTPServer(listener, s, s.Attr.TLSConfig)
 	if err != nil {
@@ -415,7 +415,7 @@ type Transmission struct {
 
 // SendAll pipes the giving data down the provided pipeline.
 func (t *Transmission) SendAll(data []byte, flush bool) error {
-	return nil
+	return t.client.SendAll(data, flush)
 }
 
 // Send pipes the giving data down the provided pipeline.

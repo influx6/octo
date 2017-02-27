@@ -17,10 +17,12 @@ import (
 	"time"
 
 	"github.com/influx6/faux/context"
-	"github.com/influx6/faux/utils"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
+	"github.com/influx6/octo/parsers/blockparser"
+	"github.com/influx6/octo/parsers/byteutils"
+	"github.com/influx6/octo/systems/blocksystem"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -78,6 +80,7 @@ type Client struct {
 	connectionInitiator bool
 	running             bool
 	doClose             bool
+	parser              octo.Parser
 	logs                octo.Logs
 	conn                net.Conn
 	info                octo.Info
@@ -335,11 +338,11 @@ func (c *Client) handleRequest(data []byte, tx octo.Transmission) error {
 
 	var dataMessage [][]byte
 	for _, us := range unserved {
-		dataMessage = append(dataMessage, utils.MakeByteMessage(us.Command, us.Data...))
+		dataMessage = append(dataMessage, byteutils.MakeByteMessage(us.Name, us.Data...))
 	}
 
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Completed")
-	return c.system.Serve(utils.MakeByteMessageGroup(dataMessage...), tx)
+	return c.system.Serve(byteutils.MakeByteMessageGroup(dataMessage...), tx)
 }
 
 // initClusterNegotiation initiates the negotiation of cluster information.
@@ -348,7 +351,7 @@ func (c *Client) initClusterNegotiation() error {
 
 	block := make([]byte, minDataSize)
 
-	c.Send(utils.WrapResponseBlock(consts.ClusterRequest, nil), true)
+	c.Send(byteutils.WrapResponseBlock(consts.ClusterRequest, nil), true)
 
 	dataLen, err := c.conn.Read(block)
 	if err != nil {
@@ -361,7 +364,7 @@ func (c *Client) initClusterNegotiation() error {
 		return ErrInvalidResponse
 	}
 
-	messages, err := utils.BlockParser.Parse(block[:dataLen])
+	messages, err := c.parser.Parse(block[:dataLen])
 	if err != nil {
 		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 		return err
@@ -372,7 +375,7 @@ func (c *Client) initClusterNegotiation() error {
 		return ErrInvalidResponse
 	}
 
-	if !bytes.Equal(messages[0].Command, consts.ClusterResponse) {
+	if !bytes.Equal(messages[0].Name, consts.ClusterResponse) {
 		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
 		return ErrAuthInvalidResponse
 	}
@@ -394,7 +397,7 @@ func (c *Client) initClusterNegotiation() error {
 		infos = append(infos, info)
 	}
 
-	c.Send(utils.MakeByteMessage(consts.ClusterPostOK, nil), true)
+	c.Send(byteutils.MakeByteMessage(consts.ClusterPostOK, nil), true)
 
 	c.server.HandleClusters(infos)
 
@@ -415,7 +418,7 @@ func (c *Client) initSlaveInfoNegotiation() error {
 			return err
 		}
 
-		messages, err := utils.BlockParser.Parse(block)
+		messages, err := c.parser.Parse(block)
 		if err != nil {
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 			return err
@@ -426,7 +429,7 @@ func (c *Client) initSlaveInfoNegotiation() error {
 			return ErrInvalidResponse
 		}
 
-		if !bytes.Equal(messages[0].Command, consts.InfoRequest) {
+		if !bytes.Equal(messages[0].Name, consts.InfoRequest) {
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidInfoResponse)
 			return ErrInvalidInfoResponse
 		}
@@ -437,7 +440,7 @@ func (c *Client) initSlaveInfoNegotiation() error {
 			return err
 		}
 
-		if err := c.Send(utils.MakeByteMessage(consts.InfoResponse, sinfoData), true); err != nil {
+		if err := c.Send(byteutils.MakeByteMessage(consts.InfoResponse, sinfoData), true); err != nil {
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Started : Client Negotiation : Initialization Failed : %s", err)
 			return err
 		}
@@ -451,7 +454,7 @@ func (c *Client) initSlaveInfoNegotiation() error {
 			return err
 		}
 
-		messages, err := utils.BlockParser.Parse(block)
+		messages, err := c.parser.Parse(block)
 		if err != nil {
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 			return err
@@ -462,7 +465,7 @@ func (c *Client) initSlaveInfoNegotiation() error {
 			return ErrInvalidResponse
 		}
 
-		if !bytes.Equal(messages[0].Command, consts.OK) {
+		if !bytes.Equal(messages[0].Name, consts.OK) {
 			c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected OK", ErrAuthInvalidResponse)
 			return ErrAuthInvalidResponse
 		}
@@ -478,7 +481,7 @@ func (c *Client) initSlaveInfoNegotiation() error {
 func (c *Client) initInfoNegotiation() error {
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initInfoNegotiation", "Started : Client Negotiation")
 
-	c.Send(utils.WrapResponseBlock(consts.InfoRequest, nil), true)
+	c.Send(byteutils.WrapResponseBlock(consts.InfoRequest, nil), true)
 
 	block, err := c.temporaryRead()
 	if err != nil {
@@ -486,7 +489,7 @@ func (c *Client) initInfoNegotiation() error {
 		return err
 	}
 
-	messages, err := utils.BlockParser.Parse(block)
+	messages, err := c.parser.Parse(block)
 	if err != nil {
 		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 		return err
@@ -497,7 +500,7 @@ func (c *Client) initInfoNegotiation() error {
 		return ErrInvalidResponse
 	}
 
-	if !bytes.Equal(messages[0].Command, consts.InfoResponse) {
+	if !bytes.Equal(messages[0].Name, consts.InfoResponse) {
 		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
 		return ErrAuthInvalidResponse
 	}
@@ -522,7 +525,7 @@ func (c *Client) initInfoNegotiation() error {
 
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initInfoNegotiation", "New Client Info : %#v", c.info)
 
-	c.Send(utils.MakeByteMessage(consts.OK, nil), true)
+	c.Send(byteutils.MakeByteMessage(consts.OK, nil), true)
 
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initInfoNegotiation", "Completed")
 	return nil
@@ -532,7 +535,7 @@ func (c *Client) initInfoNegotiation() error {
 func (c *Client) initAuthNegotiation() error {
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initAuthNegotiation", "Started")
 
-	c.Send(utils.WrapResponseBlock(consts.AuthRequest, nil), true)
+	c.Send(byteutils.WrapResponseBlock(consts.AuthRequest, nil), true)
 
 	block := make([]byte, minDataSize)
 
@@ -547,7 +550,7 @@ func (c *Client) initAuthNegotiation() error {
 		return ErrInvalidResponse
 	}
 
-	messages, err := utils.BlockParser.Parse(block[:dataLen])
+	messages, err := c.parser.Parse(block[:dataLen])
 	if err != nil {
 		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", err)
 		return err
@@ -558,7 +561,7 @@ func (c *Client) initAuthNegotiation() error {
 		return ErrInvalidResponse
 	}
 
-	if !bytes.Equal(messages[0].Command, consts.AuthResponse) {
+	if !bytes.Equal(messages[0].Name, consts.AuthResponse) {
 		c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", ErrAuthInvalidResponse)
 		return ErrAuthInvalidResponse
 	}
@@ -634,7 +637,7 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 
 	// Create a new data format for sending data over the channel using the exluding
 	// '()' character to safeguard the original message.
-	realData := utils.MakeMessage(string(consts.ClusterDistRequest), fmt.Sprintf("(%+s)", data))
+	realData := byteutils.MakeMessage(string(consts.ClusterDistRequest), fmt.Sprintf("(%+s)", data))
 
 	clusters := c.server.ClusterList()
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Cluster Delivery : %+q : Total %d", realData, len(clusters))
@@ -893,8 +896,8 @@ func (s *Server) Listen(system octo.System) error {
 	s.rl.Unlock()
 
 	s.clientSystem = system
-	s.clientBaseSystem = octo.NewBaseSystem(system, s.logs, octo.BaseHandlers())
-	s.clusterSystem = octo.NewBaseSystem(system, s.logs, octo.BaseHandlers(), octo.AuthHandlers(s), octo.ClusterHandlers(s, s, s.TransmitToClients))
+	s.clientBaseSystem = octo.NewBaseSystem(system, blockparser.Blocks, s.logs, blocksystem.BaseHandlers())
+	s.clusterSystem = octo.NewBaseSystem(system, blockparser.Blocks, s.logs, blocksystem.BaseHandlers(), blocksystem.AuthHandlers(s), blocksystem.ClusterHandlers(s, s, s.TransmitToClients))
 
 	if s.clusterListener != nil {
 		s.wg.Add(2)
@@ -950,6 +953,7 @@ func (s *Server) RelateWithCluster(addr string) error {
 			UUID:   clientID,
 			SUUID:  s.info.SUUID,
 		},
+		parser:              blockparser.Blocks,
 		server:              s,
 		conn:                conn,
 		logs:                s.logs,
@@ -1190,6 +1194,7 @@ func (s *Server) handleClientConnections(system octo.System) {
 				UUID:   clientID,
 				SUUID:  s.info.SUUID,
 			},
+			parser:              blockparser.Blocks,
 			server:              s,
 			conn:                conn,
 			logs:                s.logs,
@@ -1283,6 +1288,7 @@ func (s *Server) handleClusterConnections(system octo.System) {
 
 		var client Client
 		client = Client{
+			parser: blockparser.Blocks,
 			info: octo.Info{
 				Addr:   remoteAddr,
 				Local:  localAddr,

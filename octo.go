@@ -2,6 +2,7 @@ package octo
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/influx6/faux/context"
 	"github.com/influx6/faux/utils"
@@ -16,6 +17,24 @@ const (
 	LOGTRANSMISSION string = "TRANSMISSION"
 	LOGTRANSMITTED  string = "TRANSMITTED"
 )
+
+// Command defines a struct which holds the giving operation expected to be performed,
+// It provides the name and data of command expected.
+type Command struct {
+	Name []byte   `json:"name"`
+	Data [][]byte `json:"data"`
+}
+
+// String returns a stringified version of the giving message.
+func (c Command) String() string {
+	return fmt.Sprintf("{ Command: %+q, Data: %+q }", c.Name, c.Data)
+}
+
+// Parser defines a interface which exposes a method to parse a provided input
+// returning a giving value(interface type) or an error.
+type Parser interface {
+	Parse([]byte) ([]Command, error)
+}
 
 // Logs defines an interface which provides the capability of structures to meet the
 // interface for logging data details.

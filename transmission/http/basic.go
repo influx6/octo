@@ -1,6 +1,6 @@
-// Package httppush provides a server which implements server push system provided
+// Package httpbasic provides a server which implements server push system provided
 // by the new go http package.
-package httppush
+package httpbasic
 
 import (
 	"bytes"
@@ -18,7 +18,7 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
-// PushAttr defines a attribute struct for defining options for the WebPushServer
+// PushAttr defines a attribute struct for defining options for the WebBasicServer
 // struct.
 type PushAttr struct {
 	Addr          string
@@ -28,9 +28,9 @@ type PushAttr struct {
 	Notifications chan []byte
 }
 
-// PushServer defines a struct implements the http.ServeHTTP interface which
+// BasicServer defines a struct implements the http.ServeHTTP interface which
 // handles servicing http requests for websockets.
-type PushServer struct {
+type BasicServer struct {
 	Attr     PushAttr
 	log      octo.Logs
 	info     octo.Info
@@ -44,8 +44,8 @@ type PushServer struct {
 	doClose  bool
 }
 
-// New returns a new instance of a PushServer.
-func New(attr PushAttr) *PushServer {
+// New returns a new instance of a BasicServer.
+func New(attr PushAttr) *BasicServer {
 	ip, port, _ := net.SplitHostPort(attr.Addr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -55,7 +55,7 @@ func New(attr PushAttr) *PushServer {
 
 	var suuid = uuid.NewV4().String()
 
-	var ws PushServer
+	var ws BasicServer
 	ws.info = octo.Info{
 		SUUID:  suuid,
 		UUID:   suuid,
@@ -68,28 +68,28 @@ func New(attr PushAttr) *PushServer {
 }
 
 // Credentials return the giving credentails of the provided server.
-func (s *PushServer) Credentials() octo.AuthCredential {
+func (s *BasicServer) Credentials() octo.AuthCredential {
 	return s.Attr.Credential
 }
 
 // Listen begins the initialization of the websocket server.
-func (s *PushServer) Listen(system octo.System) error {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httppush.PushServer.Listen", "Started")
+func (s *BasicServer) Listen(system octo.System) error {
+	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Started")
 
 	if s.isRunning() {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "httppush.PushServer.Listen", "Completed")
+		s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Completed")
 		return nil
 	}
 
 	listener, err := netutils.MakeListener("tcp", s.Attr.Addr, s.Attr.TLSConfig)
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httppush.PushServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
+		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
 		return err
 	}
 
 	server, tlListener, err := netutils.NewHTTPServer(listener, s, s.Attr.TLSConfig)
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httppush.PushServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
+		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
 		return err
 	}
 
@@ -105,23 +105,17 @@ func (s *PushServer) Listen(system octo.System) error {
 	}
 	s.rl.Unlock()
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httppush.PushServer.Listen", "Completed")
+	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Completed")
 	return nil
 }
 
 // ServeHTTP implements the http.Handler.ServeHTTP interface method to handle http request
 // converted to websockets request.
-func (s *PushServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httppush.PushServer.ServeHTTP", "Started")
+func (s *BasicServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Started")
 
 	if s.shouldClose() {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "httppush.PushServer.ServeHTTP", "Completed")
-		return
-	}
-
-	pusherResponse, ok := w.(http.Pusher)
-	if !ok {
-		http.Error(w, "HTTP Push not supported", http.StatusInternalServerError)
+		s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Completed")
 		return
 	}
 
@@ -134,13 +128,12 @@ func (s *PushServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cuuid = uuid.NewV4().String()
-	var pusher PushTransmission
-	pusher.ctx = context.NewGoogleContext(r.Context())
-	pusher.Pusher = pusherResponse
-	pusher.Request = r
-	pusher.Writer = w
-	pusher.server = s
-	pusher.info = octo.Info{
+	var basic BasicTransmission
+	basic.ctx = context.NewGoogleContext(r.Context())
+	basic.Request = r
+	basic.Writer = w
+	basic.server = s
+	basic.info = octo.Info{
 		UUID:   cuuid,
 		SUUID:  s.info.SUUID,
 		Local:  s.info.Addr,
@@ -148,26 +141,26 @@ func (s *PushServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Remote: r.RemoteAddr,
 	}
 
-	rem, err := s.primary.ServeBase(data.Bytes(), &pusher)
+	rem, err := s.primary.ServeBase(data.Bytes(), &basic)
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httppush.PushServer.acceptRequests", "PushServer System : Fails Parsing : Error : %+s", err)
+		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.acceptRequests", "BasicServer System : Fails Parsing : Error : %+s", err)
 
-		if err := s.system.Serve(data.Bytes(), &pusher); err != nil {
-			s.log.Log(octo.LOGERROR, s.info.UUID, "httppush.PushServer.ServeHTTP", "PushServer System : Fails Parsing : Error : %+s", err)
+		if err := s.system.Serve(data.Bytes(), &basic); err != nil {
+			s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "BasicServer System : Fails Parsing : Error : %+s", err)
 		}
 	}
 
 	// Handle remaining messages and pass it to user system.
-	if err := s.system.Serve(utils.JoinMessages(rem...), &pusher); err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httppush.PushServer.ServeHTTP", "PushServer System : Fails Parsing : Error : %+s", err)
+	if err := s.system.Serve(utils.JoinMessages(rem...), &basic); err != nil {
+		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "BasicServer System : Fails Parsing : Error : %+s", err)
 	}
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httppush.PushServer.ServeHTTP", "Completed")
+	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Completed")
 }
 
 // Close ends the websocket connection and ensures all requests are finished.
-func (s *PushServer) Close() error {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httppush.PushServer.Close", "Start")
+func (s *BasicServer) Close() error {
+	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Close", "Start")
 	if !s.isRunning() {
 		return nil
 	}
@@ -181,27 +174,27 @@ func (s *PushServer) Close() error {
 	s.rl.Unlock()
 
 	if err := s.server.Close(); err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httppush.PushServer.Close", "Completed : %+q", err.Error())
+		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.Close", "Completed : %+q", err.Error())
 	}
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httppush.PushServer.Close", "Completed")
+	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Close", "Completed")
 	return nil
 }
 
 // Wait awaits the closure of the giving client.
-func (s *PushServer) Wait() {
+func (s *BasicServer) Wait() {
 	s.wg.Wait()
 }
 
 // shouldClose returns true/false if the client should close.
-func (s *PushServer) shouldClose() bool {
+func (s *BasicServer) shouldClose() bool {
 	s.rl.Lock()
 	defer s.rl.Unlock()
 	return s.doClose
 }
 
 // isRunning returns true/false if the client is still running.
-func (s *PushServer) isRunning() bool {
+func (s *BasicServer) isRunning() bool {
 	s.rl.Lock()
 	defer s.rl.Unlock()
 	return s.running
@@ -209,27 +202,26 @@ func (s *PushServer) isRunning() bool {
 
 //================================================================================
 
-// PushTransmission defines a struct to hold the request and response object.
-type PushTransmission struct {
+// BasicTransmission defines a struct to hold the request and response object.
+type BasicTransmission struct {
 	Request *http.Request
 	Writer  http.ResponseWriter
-	Pusher  http.Pusher
 	ctx     context.Context
-	server  *PushServer
+	server  *BasicServer
 	info    octo.Info
 	log     octo.Logs
 	buffer  bytes.Buffer
 }
 
 // SendAll pipes the giving data down the provided pipeline.
-// This function call the PushTransmission.Send function internally,
+// This function call the BasicTransmission.Send function internally,
 // as multiple requests is not supported.
-func (t *PushTransmission) SendAll(data []byte, flush bool) error {
+func (t *BasicTransmission) SendAll(data []byte, flush bool) error {
 	return t.Send(data, flush)
 }
 
 // Send pipes the giving data down the provided pipeline.
-func (t *PushTransmission) Send(data []byte, flush bool) error {
+func (t *BasicTransmission) Send(data []byte, flush bool) error {
 	t.buffer.Write(data)
 
 	if !flush {
@@ -240,16 +232,16 @@ func (t *PushTransmission) Send(data []byte, flush bool) error {
 }
 
 // Info returns the giving information for the internal client and server.
-func (t *PushTransmission) Info() (octo.Info, octo.Info) {
+func (t *BasicTransmission) Info() (octo.Info, octo.Info) {
 	return t.info, t.server.info
 }
 
 // Ctx returns the context that is related to this object.
-func (t *PushTransmission) Ctx() context.Context {
+func (t *BasicTransmission) Ctx() context.Context {
 	return t.ctx
 }
 
 // Close ends the internal conneciton.
-func (t *PushTransmission) Close() error {
+func (t *BasicTransmission) Close() error {
 	return nil
 }

@@ -40,6 +40,8 @@ var (
 // Each has it's request and response version.
 var (
 	CTRLLine           = []byte(CTRL)
+	PING               = []byte("PING")
+	PONG               = []byte("PONG")
 	ClientInfoRequest  = []byte("CLINFO")
 	ClientInfoResponse = []byte("CLINFORES")
 	InfoRequest        = []byte("INFO")
@@ -55,5 +57,6 @@ var (
 
 // contains the set of errors used by the package.
 var (
-	ErrConnClosed = errors.New("Connection Closed")
+	ErrConnClosed  = errors.New("Connection Closed")
+	ErrUnsupported = errors.New("Functionality is unsupported")
 )
