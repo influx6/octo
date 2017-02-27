@@ -2,7 +2,6 @@ package tcp_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"testing"
 
 	"github.com/influx6/faux/utils"
@@ -16,26 +15,8 @@ import (
 func TestServer(t *testing.T) {
 	log := mock.NewLogger(t)
 	system := mock.NewMSystem(map[string]mock.MessageHandler{
-		"CLOSE": func(m utils.Message, tx octo.Transmission) error {
-			defer tx.Close()
-
-			return tx.Send(utils.WrapResponseBlock([]byte("OK"), nil), true)
-		},
-		"PONG": func(m utils.Message, tx octo.Transmission) error {
+		"BONG": func(m utils.Message, tx octo.Transmission) error {
 			return tx.Send(utils.WrapResponseBlock([]byte("PING"), nil), true)
-		},
-		"PING": func(m utils.Message, tx octo.Transmission) error {
-			return tx.Send(utils.WrapResponseBlock([]byte("PONG"), nil), true)
-		},
-		"INFO": func(m utils.Message, tx octo.Transmission) error {
-			_, serverInfo := tx.Info()
-
-			infx, err := json.Marshal(serverInfo)
-			if err != nil {
-				return err
-			}
-
-			return tx.Send(utils.WrapResponseBlock([]byte("INFORES"), infx), true)
 		},
 	})
 
@@ -126,11 +107,6 @@ func TestClustereServers(t *testing.T) {
 	log := mock.NewLogger(t)
 
 	system := mock.NewMSystem(map[string]mock.MessageHandler{
-		"CLOSE": func(m utils.Message, tx octo.Transmission) error {
-			defer tx.Close()
-
-			return tx.Send(utils.WrapResponseBlock([]byte("OK"), nil), true)
-		},
 		"POP": func(m utils.Message, tx octo.Transmission) error {
 			return tx.Send(utils.WrapResponseBlock([]byte("PUSH"), nil), true)
 		},
@@ -163,10 +139,12 @@ func TestClustereServers(t *testing.T) {
 	}
 	tests.Passed(t, "Should have successfully connected server2 with server1 cluster.")
 
-	if clusters[0].SUUID != server.Info().SUUID {
-		tests.Failed(t, "Should have successfully added server.UUID cluter to server2 cluster list.")
+	if clusters[0].UUID != server.CInfo().UUID {
+		t.Logf("\t\t Received: %#v", clusters[0])
+		t.Logf("\t\t Expected: %#v", server.CInfo())
+		tests.Failed(t, "Should have successfully added server.UUID cluster to server2 cluster list.")
 	}
-	tests.Passed(t, "Should have successfully added server.UUID cluter to server2 cluster list.")
+	tests.Passed(t, "Should have successfully added server.UUID cluster to server2 cluster list.")
 }
 
 // TestClusterServerSendAll tests the validity of our server code.

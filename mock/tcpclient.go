@@ -88,7 +88,7 @@ func (t *TCPClient) Read() ([]byte, error) {
 		return nil, ErrClosedConnection
 	}
 
-	t.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	t.conn.SetReadDeadline(time.Now().Add(7 * time.Second))
 
 	block := make([]byte, 6085)
 

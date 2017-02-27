@@ -336,13 +336,13 @@ func (c *Client) handleRequest(data []byte, tx octo.Transmission) error {
 		return err
 	}
 
-	var dataMessage [][]byte
-	for _, us := range unserved {
-		dataMessage = append(dataMessage, byteutils.MakeByteMessage(us.Name, us.Data...))
+	if len(unserved) == 0 {
+		c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Completed")
+		return nil
 	}
 
 	c.logs.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Completed")
-	return c.system.Serve(byteutils.MakeByteMessageGroup(dataMessage...), tx)
+	return c.system.Serve(byteutils.JoinMessages(unserved...), tx)
 }
 
 // initClusterNegotiation initiates the negotiation of cluster information.
@@ -790,6 +790,11 @@ func New(logs octo.Logs, attr ServerAttr) *Server {
 	}
 
 	return &s
+}
+
+// CInfo returns the octo.Info related with this server cluster listener.
+func (s *Server) CInfo() octo.Info {
+	return s.clusterInfo
 }
 
 // Info returns the octo.Info related with this server.
