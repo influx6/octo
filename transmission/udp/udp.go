@@ -206,10 +206,15 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 	network := addr.Network()
 	addrString := addr.String()
 
+	var index int
+
 	// Look through the client list if we've already encountered such a client,
 	// and return it.
 	s.cl.Lock()
 	{
+
+		index = len(s.clients)
+
 		for _, client := range s.clients {
 			if client.addr.Network() == network && client.addr.String() == addrString {
 				return copyClient(&client)
@@ -234,6 +239,7 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 		conn:   s.conn,
 		server: s,
 		ctx:    context.New(),
+		index:  index,
 	}
 
 	s.cl.Lock()
@@ -281,7 +287,6 @@ func (s *Server) handleConnections(system octo.System) {
 		n, addr, err := s.conn.ReadFromUDP(block)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// c.logs.Log(octo.LOGERROR, c.info.UUID, "udp.Client.acceptRequests", "ReadTimeout")
 				continue
 			}
 
@@ -295,11 +300,20 @@ func (s *Server) handleConnections(system octo.System) {
 		// Retrieve the client with the provided addr and serve the respone in a go
 		// routine.
 		s.rg.Add(1)
+
 		go func(data []byte, tx *Client) {
 			defer s.rg.Done()
 
-			if err := tx.authenticate(); err != nil {
+			authenticated := tx.authenticated
+			if err := tx.authenticate(data); err != nil {
 				s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Client Auth : Authentication Failed : Error : %+s", err)
+				go tx.Close()
+				return
+			}
+
+			// If its false, then its a new connection that should have been authenticated,
+			// so we dont serve the initial request since authentication is on.
+			if !authenticated && s.Attr.Authenticate {
 				return
 			}
 
@@ -309,6 +323,7 @@ func (s *Server) handleConnections(system octo.System) {
 
 				if err := s.system.Serve(data, tx); err != nil {
 					s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+					return
 				}
 			}
 
@@ -316,6 +331,7 @@ func (s *Server) handleConnections(system octo.System) {
 			if rem != nil {
 				if err := s.system.Serve(byteutils.JoinMessages(rem...), tx); err != nil {
 					s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+					return
 				}
 			}
 		}(block[:n], s.retrieveOrAdd(addr))
@@ -341,37 +357,55 @@ func (s *Server) handleConnections(system octo.System) {
 
 // Client defines the structure which communicates with other udp connections.
 type Client struct {
-	log    octo.Logs
-	conn   *net.UDPConn
-	addr   *net.UDPAddr
-	server *Server
-	ctx    context.Context
-	info   octo.Info
+	log           octo.Logs
+	conn          *net.UDPConn
+	addr          *net.UDPAddr
+	server        *Server
+	ctx           context.Context
+	info          octo.Info
+	authenticated bool
+	index         int
 }
 
 // authenticate runs the authentication procedure to authenticate that the connection
 // was valid.
-func (c *Client) authenticate() error {
+func (c *Client) authenticate(data []byte) error {
 	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Started")
 	if !c.server.Attr.Authenticate {
 		c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 		return nil
 	}
 
+	if c.authenticated {
+		c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
+		return nil
+	}
+
 	var cmd octo.Command
-	cmd.Name = consts.AuthRequest
 
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(cmd); err != nil {
+	if err := json.Unmarshal(data, &cmd); err != nil {
 		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", err.Error())
 		return nil
 	}
 
-	if err := c.Send(buf.Bytes(), true); err != nil {
+	if !bytes.Equal(cmd.Name, consts.AuthResponse) {
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", consts.ErrAuthorizationFailed.Error())
+		return consts.ErrAuthorizationFailed
+	}
+
+	var auth octo.AuthCredential
+
+	if err := json.Unmarshal(bytes.Join(cmd.Data, []byte("")), &cmd); err != nil {
 		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", err.Error())
 		return nil
 	}
 
+	if err := c.server.system.Authenticate(auth); err != nil {
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", err.Error())
+		return nil
+	}
+
+	c.authenticated = true
 	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 	return nil
 }
@@ -421,6 +455,11 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 // Close usually closes the connection patterning to the giving client, but in
 // udp the server connection handles the response, so operation happens here.
 func (c *Client) Close() error {
+	c.server.cl.Lock()
+	{
+		c.server.clients = append(c.server.clients[:c.index], c.server.clients[c.index+1:]...)
+	}
+	c.server.cl.Unlock()
 	return nil
 }
 

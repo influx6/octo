@@ -26,7 +26,7 @@ const (
 	MinDataSize      = 512
 	MaxConnections   = (64 * 1024)
 	MaxPayload       = (1024 * 1024)
-	MaxBufferSize    = (2 * 1024)
+	MaxBufferSize    = (1024 * 1024)
 	MaxDataWrite     = 6048
 )
 
@@ -59,4 +59,8 @@ var (
 var (
 	ErrConnClosed  = errors.New("Connection Closed")
 	ErrUnsupported = errors.New("Functionality is unsupported")
+
+	// ErrAuthorizationFailed  is the error returned when the giving credentials
+	// fail to authenticate.
+	ErrAuthorizationFailed = errors.New("Invalid Credentials: Authorization Failed")
 )
