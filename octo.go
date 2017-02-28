@@ -1,12 +1,9 @@
 package octo
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/influx6/faux/context"
-	"github.com/influx6/faux/utils"
-	"github.com/influx6/octo/consts"
 )
 
 // Contains sets of log levels usable in logging operation details.
@@ -106,20 +103,10 @@ type Info struct {
 // AuthCredential defines a struct which holds credentails related to
 // the client connecting to the provider.
 type AuthCredential struct {
-	APIKey string `json:"api_key"`
+	Scheme string `json:"scheme"`
+	Key    string `json:"key"`
 	Token  string `json:"token"`
 	Data   []byte `json:"data"`
-}
-
-// TCPResponse returns the giving response expected by the tcp server when request
-// authentication response.
-func (ac AuthCredential) TCPResponse() ([]byte, error) {
-	data, err := json.Marshal(ac)
-	if err != nil {
-		return nil, err
-	}
-
-	return utils.MakeByteMessage(consts.AuthResponse, data), nil
 }
 
 // Credentials defines a type which exposes a method to return the credentials

@@ -17,6 +17,19 @@ import (
 	"time"
 )
 
+// GetAddr takes the giving address string and if it has no ip or use the
+// zeroth ip format, then modifies the ip with the current systems ip.
+func GetAddr(addr string) string {
+	ip, port, _ := net.SplitHostPort(addr)
+	if ip == "" || ip == "0.0.0.0" {
+		if realIP, err := GetMainIP(); err == nil {
+			return net.JoinHostPort(realIP, port)
+		}
+	}
+
+	return addr
+}
+
 //==============================================================================
 
 //LoadTLS loads a tls.Config from a key and cert file path

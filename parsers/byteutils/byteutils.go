@@ -2,8 +2,10 @@ package byteutils
 
 import (
 	"bytes"
+	"encoding/json"
 
 	"github.com/influx6/octo"
+	"github.com/influx6/octo/consts"
 )
 
 var (
@@ -167,4 +169,15 @@ func WrapResponse(header []byte, msgs ...[]byte) []byte {
 	}
 
 	return bytes.Join(responses, colonSlice)
+}
+
+// TCPResponse returns the giving response expected by the tcp server when request
+// authentication response.
+func TCPResponse(ac octo.AuthCredential) ([]byte, error) {
+	data, err := json.Marshal(ac)
+	if err != nil {
+		return nil, err
+	}
+
+	return MakeByteMessage(consts.AuthResponse, data), nil
 }

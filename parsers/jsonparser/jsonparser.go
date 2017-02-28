@@ -16,13 +16,20 @@ type jsonparser struct{}
 // Parse attempts to use `encode/json` to parse giving byte into a slice of command
 // objects.
 func (jsonparser) Parse(msg []byte) ([]octo.Command, error) {
-	if len(msg) == 0 {
+	if len(msg) == 0 || msg == nil {
 		return nil, errors.New("Empty Data Received")
 	}
 
 	var commands []octo.Command
 
 	if err := json.Unmarshal(msg, &commands); err != nil {
+		var single octo.Command
+
+		if errx := json.Unmarshal(msg, &single); errx == nil {
+			commands = append(commands, single)
+			return commands, nil
+		}
+
 		return nil, err
 	}
 

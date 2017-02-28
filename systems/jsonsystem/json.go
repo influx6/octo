@@ -1,6 +1,7 @@
 package jsonsystem
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/influx6/octo"
@@ -26,8 +27,17 @@ func sendJSON(tx octo.Transmission, val interface{}, flush bool) error {
 
 // AuthHandlers provides a MessageHandlers providing auth operations/events
 // handling.
-func AuthHandlers(credential octo.Credentials) octo.MessageHandlerMap {
+func AuthHandlers(credential octo.Credentials, authenticator octo.Authenticator) octo.MessageHandlerMap {
 	return octo.MessageHandlerMap{
+		string(consts.AuthResponse): func(m octo.Command, tx octo.Transmission) error {
+			var userCredentials octo.AuthCredential
+
+			if err := json.Unmarshal(bytes.Join(m.Data, []byte("")), &userCredentials); err != nil {
+				return err
+			}
+
+			return authenticator.Authenticate(userCredentials)
+		},
 		string(consts.AuthRequest): func(m octo.Command, tx octo.Transmission) error {
 			parsed, err := json.Marshal(credential.Credential())
 			if err != nil {

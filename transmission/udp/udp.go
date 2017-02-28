@@ -4,6 +4,8 @@
 package udp
 
 import (
+	"bytes"
+	"encoding/json"
 	"net"
 	"sync"
 
@@ -32,6 +34,7 @@ const (
 // and behaves.
 type ServerAttr struct {
 	Addr               string
+	Authenticate       bool
 	Version            Version
 	Credential         octo.AuthCredential
 	MulticastInterface *net.Interface
@@ -177,7 +180,7 @@ func (s *Server) Listen(system octo.System) error {
 
 	s.conn = conn
 	s.system = system
-	s.base = octo.NewBaseSystem(system, jsonparser.JSON, s.log, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(s))
+	s.base = octo.NewBaseSystem(system, jsonparser.JSON, s.log, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(s, system))
 
 	// Set the server state as active.
 	s.rl.Lock()
@@ -292,8 +295,13 @@ func (s *Server) handleConnections(system octo.System) {
 		// Retrieve the client with the provided addr and serve the respone in a go
 		// routine.
 		s.rg.Add(1)
-		go func(data []byte, tx octo.Transmission) {
+		go func(data []byte, tx *Client) {
 			defer s.rg.Done()
+
+			if err := tx.authenticate(); err != nil {
+				s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Client Auth : Authentication Failed : Error : %+s", err)
+				return
+			}
 
 			rem, err := s.base.ServeBase(data, tx)
 			if err != nil {
@@ -305,8 +313,10 @@ func (s *Server) handleConnections(system octo.System) {
 			}
 
 			// Handle remaining messages and pass it to user system.
-			if err := s.system.Serve(byteutils.JoinMessages(rem...), tx); err != nil {
-				s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+			if rem != nil {
+				if err := s.system.Serve(byteutils.JoinMessages(rem...), tx); err != nil {
+					s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+				}
 			}
 		}(block[:n], s.retrieveOrAdd(addr))
 
@@ -337,6 +347,33 @@ type Client struct {
 	server *Server
 	ctx    context.Context
 	info   octo.Info
+}
+
+// authenticate runs the authentication procedure to authenticate that the connection
+// was valid.
+func (c *Client) authenticate() error {
+	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Started")
+	if !c.server.Attr.Authenticate {
+		c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
+		return nil
+	}
+
+	var cmd octo.Command
+	cmd.Name = consts.AuthRequest
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(cmd); err != nil {
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", err.Error())
+		return nil
+	}
+
+	if err := c.Send(buf.Bytes(), true); err != nil {
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", err.Error())
+		return nil
+	}
+
+	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
+	return nil
 }
 
 // Send delivers the message to the giving addr associated with the client.

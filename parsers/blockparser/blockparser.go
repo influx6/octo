@@ -49,7 +49,7 @@ type blockParser struct{}
 // Parse parses the data data coming in and produces a series of Messages
 // based on a base pattern.
 func (b blockParser) Parse(msg []byte) ([]octo.Command, error) {
-	if len(msg) == 0 {
+	if len(msg) == 0 || msg == nil {
 		return nil, errors.New("Empty Data Received")
 	}
 

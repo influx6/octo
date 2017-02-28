@@ -30,6 +30,7 @@ type RequestOriginValidator func(*http.Request) bool
 // struct.
 type SocketAttr struct {
 	Addr               string
+	Authenticate       bool
 	Headers            http.Header
 	Credential         octo.AuthCredential
 	TLSConfig          *tls.Config
@@ -386,8 +387,10 @@ func (c *Client) acceptRequests() {
 		}
 
 		// Handle remaining messages and pass it to user system.
-		if err := c.system.Serve(byteutils.JoinMessages(rem...), &tx); err != nil {
-			c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
+		if rem != nil {
+			if err := c.system.Serve(byteutils.JoinMessages(rem...), &tx); err != nil {
+				c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
+			}
 		}
 
 		if c.shouldClose() {

@@ -8,6 +8,11 @@ import (
 // succeedMark is the Unicode codepoint for a check mark.
 const succeedMark = "\u2713"
 
+// Info logs the failure message using the giving message and values.
+func Info(t *testing.T, message string, val ...interface{}) {
+	t.Logf("\t\t %s", fmt.Sprintf(message, val...))
+}
+
 // Passed logs the failure message using the giving message and values.
 func Passed(t *testing.T, message string, val ...interface{}) {
 	t.Logf("\t%s\t %s", succeedMark, fmt.Sprintf(message, val...))
