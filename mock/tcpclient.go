@@ -68,7 +68,7 @@ func (t *TCPClient) Write(data []byte, flush bool) error {
 // all reads and writers.
 func (t *TCPClient) Close() error {
 	if t.conn == nil {
-		return nil
+		return ErrClosedConnection
 	}
 
 	err := t.conn.Close()

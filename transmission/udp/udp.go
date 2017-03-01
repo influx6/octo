@@ -120,8 +120,10 @@ func (s *Server) Close() error {
 	}
 
 	s.rl.Lock()
-	s.running = false
-	s.doClose = true
+	{
+		s.running = false
+		s.doClose = true
+	}
 	s.rl.Unlock()
 
 	// Await for last request.
@@ -186,6 +188,7 @@ func (s *Server) Listen(system octo.System) error {
 	s.rl.Lock()
 	{
 		s.running = true
+		s.doClose = false
 	}
 	s.rl.Unlock()
 
@@ -200,6 +203,8 @@ func (s *Server) Listen(system octo.System) error {
 // retrieveOrAdd checks if there exists a client with the giving address else
 // returns a new Client object for the giving address.
 func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
+	s.log.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Started")
+
 	s.cl.Lock()
 	defer s.cl.Unlock()
 
@@ -210,7 +215,6 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 
 	// Look through the client list if we've already encountered such a client,
 	// and return it.
-	s.cl.Lock()
 	{
 
 		index = len(s.clients)
@@ -221,10 +225,8 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 			}
 		}
 	}
-	s.cl.Unlock()
 
 	cuuid := uuid.NewV4().String()
-
 	info := octo.Info{
 		Addr:   addr.IP.String(),
 		Remote: addr.IP.String(),
@@ -242,12 +244,9 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 		index:  index,
 	}
 
-	s.cl.Lock()
-	{
-		s.clients = append(s.clients, cl)
-	}
-	s.cl.Unlock()
+	s.clients = append(s.clients, cl)
 
+	s.log.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Completed")
 	return &cl
 }
 
@@ -285,16 +284,19 @@ func (s *Server) handleConnections(system octo.System) {
 
 	for s.IsRunning() {
 		if s.stopRunning() {
+			s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "Closing")
 			break
 		}
 
 		n, addr, err := s.conn.ReadFromUDP(block)
+		s.log.Log(octo.LOGTRANSMITTED, s.info.UUID, "udp.Server.handleConnections", "Received : %+q : %+q", block[:n], addr.String())
+		s.log.Log(octo.LOGTRANSMITTED, s.info.UUID, "udp.Server.handleConnections", "Completed")
+
 		if err != nil {
+			s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "Read Error : %+s", err)
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
 			}
-
-			s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "Read Error : %+s", err)
 
 			// TODO: Do we wish to break here or continue?
 			// break
@@ -305,7 +307,10 @@ func (s *Server) handleConnections(system octo.System) {
 		// routine.
 		s.rg.Add(1)
 
-		go func(data []byte, tx *Client) {
+		s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Initiaiting Client Connection : %+q", addr)
+
+		(func(data []byte, tx *Client) {
+			s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Client Init : %+q", tx.info)
 			defer s.rg.Done()
 
 			authenticated := tx.authenticated
@@ -338,7 +343,7 @@ func (s *Server) handleConnections(system octo.System) {
 					return
 				}
 			}
-		}(block[:n], s.retrieveOrAdd(addr))
+		}(block[:n], s.retrieveOrAdd(addr)))
 
 		// TODO: Do we need the expansion algorithmn here?
 		if n == len(block) && len(block) < consts.MaxDataWrite {
@@ -455,11 +460,13 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 // Close usually closes the connection patterning to the giving client, but in
 // udp the server connection handles the response, so operation happens here.
 func (c *Client) Close() error {
+	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Close", "Started : %+q", c.info)
 	c.server.cl.Lock()
 	{
 		c.server.clients = append(c.server.clients[:c.index], c.server.clients[c.index+1:]...)
 	}
 	c.server.cl.Unlock()
+	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Close", "Completed")
 	return nil
 }
 
