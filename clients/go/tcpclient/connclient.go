@@ -1,4 +1,4 @@
-package TCPConnClient
+package tcpclient
 
 import (
 	"bufio"
