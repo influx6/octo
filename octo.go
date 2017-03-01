@@ -15,6 +15,8 @@ const (
 	LOGTRANSMITTED  string = "TRANSMITTED"
 )
 
+//================================================================================
+
 // Command defines a struct which holds the giving operation expected to be performed,
 // It provides the name and data of command expected.
 type Command struct {
@@ -27,10 +29,23 @@ func (c Command) String() string {
 	return fmt.Sprintf("{ Command: %+q, Data: %+q }", c.Name, c.Data)
 }
 
+//================================================================================
+
 // Parser defines a interface which exposes a method to parse a provided input
 // returning a giving value(interface type) or an error.
 type Parser interface {
 	Parse([]byte) ([]Command, error)
+}
+
+//================================================================================
+
+// Instrumentation defines an interface for needed features that provided logging,
+// metric measurements and time tracking, these instrumentation details allows us
+// to measure the internal operations of systems.
+type Instrumentation interface {
+	Logs
+	EventInstrumentation
+	TimeInstrumentation
 }
 
 // Logs defines an interface which provides the capability of structures to meet the
@@ -39,12 +54,31 @@ type Logs interface {
 	Log(level string, namespace string, function string, message string, items ...interface{})
 }
 
+// EventInstrumentation defines an interface which provides a instrumentation for reporting connection
+// based event.
+type EventInstrumentation interface {
+	NotifyConnection(context string, in Info, meta []byte)
+	NotifyDisconnection(context string, in Info, meta []byte)
+	NotifyConnectionWrite(context string, in Info, data []byte)
+}
+
+// TimeInstrumentation defines an interface which provides a instrumentation for reporting connection
+// based event.
+type TimeInstrumentation interface {
+	Start(context string, op string, uuid string)
+	End(context string, op string, uuid string)
+}
+
+//================================================================================
+
 // TransmissionProtocol defines a type which accepts a system and encapsulates the transmission
 // and exchange of data using the System has the processing unit.
 type TransmissionProtocol interface {
 	Close() error
 	Listen(System) error
 }
+
+//================================================================================
 
 // TransmissionServer defines a type which exposes a method to service a provided
 // data.
@@ -78,6 +112,8 @@ func (s SelectiveServers) Serve(data []byte, tx Transmission) error {
 	return ErrRequestUnsearvable
 }
 
+//================================================================================
+
 // Authenticator defines a interface type which exposes a method which handles
 // the processing of credential authentication.
 type Authenticator interface {
@@ -91,6 +127,8 @@ type System interface {
 	TransmissionServer
 }
 
+//================================================================================
+
 // Info defines specific data related to a giving source.
 type Info struct {
 	UUID   string `json:"uuid"`
@@ -99,6 +137,8 @@ type Info struct {
 	Remote string `json:"remote"`
 	Local  string `json:"local"`
 }
+
+//================================================================================
 
 // AuthCredential defines a struct which holds credentails related to
 // the client connecting to the provider.
@@ -109,11 +149,15 @@ type AuthCredential struct {
 	Data   []byte `json:"data"`
 }
 
+//================================================================================
+
 // Credentials defines a type which exposes a method to return the credentials
 // for the giving entity.
 type Credentials interface {
 	Credential() AuthCredential
 }
+
+//================================================================================
 
 // Transmission defines an interface which exposes methods to transmit data over
 // a giving transmit.
@@ -125,18 +169,4 @@ type Transmission interface {
 	SendAll(data []byte, flush bool) error
 }
 
-// ReceivedTransmit defines a structure which is used to deliver
-// specific data from a giving System with the Transmission
-// through which it responds.
-type ReceivedTransmit struct {
-	Data []byte
-	UUID string
-}
-
-// SentTransmit defines a structure which is used to deliver
-// specific data from a giving System with the Transmission
-// through which it responds.
-type SentTransmit struct {
-	Data []byte
-	UUID string
-}
+//================================================================================

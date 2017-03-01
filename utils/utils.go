@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -10,6 +11,27 @@ import (
 	"github.com/influx6/octo/parsers/byteutils"
 	uuid "github.com/satori/go.uuid"
 )
+
+// AuthCredentialFromJSON returns the value of AuthCredential using json encoding.
+func AuthCredentialFromJSON(m []byte) (octo.AuthCredential, error) {
+	var b octo.AuthCredential
+
+	if err := json.Unmarshal(m, &b); err != nil {
+		return b, err
+	}
+
+	return b, nil
+}
+
+// AuthCredentialToJSON returns the value of AuthCredential using json encoding.
+func AuthCredentialToJSON(ac octo.AuthCredential) ([]byte, error) {
+	data, err := json.Marshal(&ac)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
 
 // NewInfo returns a new instance of a Info object.
 func NewInfo(addr string) octo.Info {
@@ -24,6 +46,18 @@ func NewInfo(addr string) octo.Info {
 	}
 }
 
+// ToCommand returns the a octo.Command from the giving byte slice if its a
+// jsonified data of a octo.Command.
+func ToCommand(data []byte) (octo.Command, error) {
+	var cmd octo.Command
+
+	if err := json.Unmarshal(data, &cmd); err != nil {
+		return cmd, err
+	}
+
+	return cmd, nil
+}
+
 // NewCommand returns a new command object with the provided name and data.
 func NewCommand(name string, data ...string) octo.Command {
 	var cmd octo.Command
@@ -31,6 +65,36 @@ func NewCommand(name string, data ...string) octo.Command {
 	cmd.Data = byteutils.StringsToBytes(data...)
 
 	return cmd
+}
+
+// NewCommandMessage returns a new Command object with its equivalent json encoded
+// byte slice.
+func NewCommandMessage(name string, data ...string) ([]byte, octo.Command, error) {
+	var cmd octo.Command
+	cmd.Name = []byte(name)
+	cmd.Data = byteutils.StringsToBytes(data...)
+
+	mdata, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, cmd, err
+	}
+
+	return mdata, cmd, nil
+}
+
+// NewCommandByte returns a new Command object with its equivalent json encoded
+// byte slice.
+func NewCommandByte(name []byte, data ...[]byte) ([]byte, octo.Command, error) {
+	var cmd octo.Command
+	cmd.Name = []byte(name)
+	cmd.Data = data
+
+	mdata, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, cmd, err
+	}
+
+	return mdata, cmd, nil
 }
 
 // ParseAuthorization returns the giving scheme and values of the provided authentication

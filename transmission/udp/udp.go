@@ -16,6 +16,7 @@ import (
 	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/parsers/jsonparser"
 	"github.com/influx6/octo/systems/jsonsystem"
+	"github.com/influx6/octo/utils"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -42,20 +43,22 @@ type ServerAttr struct {
 
 // Server defines a struct for a managing the internals of a UDP server.
 type Server struct {
-	log     octo.Logs
-	Attr    ServerAttr
-	conn    *net.UDPConn
-	ip      *net.UDPAddr
-	info    octo.Info
-	wg      sync.WaitGroup
-	rg      sync.WaitGroup
-	base    *octo.BaseSystem
-	system  octo.System
-	rl      sync.Mutex
-	running bool
-	doClose bool
-	cl      sync.Mutex
-	clients []Client
+	log                 octo.Logs
+	Attr                ServerAttr
+	conn                *net.UDPConn
+	ip                  *net.UDPAddr
+	info                octo.Info
+	wg                  sync.WaitGroup
+	rg                  sync.WaitGroup
+	base                *octo.BaseSystem
+	system              octo.System
+	rl                  sync.Mutex
+	running             bool
+	doClose             bool
+	cl                  sync.Mutex
+	clients             []Client
+	cwl                 sync.Mutex
+	clientAuthenticated map[string]bool
 }
 
 // New returns a new instance of the UDP server.
@@ -63,6 +66,7 @@ func New(log octo.Logs, attr ServerAttr) *Server {
 	var s Server
 	s.log = log
 	s.Attr = attr
+	s.clientAuthenticated = make(map[string]bool)
 
 	ip, port, _ := net.SplitHostPort(attr.Addr)
 	if ip == "" || ip == consts.AnyIP {
@@ -220,11 +224,15 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 		index = len(s.clients)
 
 		for _, client := range s.clients {
-			if client.addr.Network() == network && client.addr.String() == addrString {
+			// TODO: Do we want to match by network: `client.addr.Network() == network` ?
+			if client.addr.String() == addrString {
+				s.log.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Found Existing Client : %q : %q", network, addr.String())
 				return copyClient(&client)
 			}
 		}
 	}
+
+	s.log.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Creating New Client : %q : %q", network, addr.String())
 
 	cuuid := uuid.NewV4().String()
 	info := octo.Info{
@@ -313,18 +321,20 @@ func (s *Server) handleConnections(system octo.System) {
 			s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Client Init : %+q", tx.info)
 			defer s.rg.Done()
 
-			authenticated := tx.authenticated
 			if err := tx.authenticate(data); err != nil {
 				s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Client Auth : Authentication Failed : Error : %+s", err)
 				go tx.Close()
 				return
 			}
 
-			// If its false, then its a new connection that should have been authenticated,
-			// so we dont serve the initial request since authentication is on.
-			if !authenticated && s.Attr.Authenticate {
-				return
-			}
+			// NOTE: We dont need to this here because the Client.authenticate method handles.
+			// var authenticated bool
+			//
+			// s.cwl.Lock()
+			// {
+			// 	authenticated = s.clientAuthenticated[addr.String()]
+			// }
+			// c.cwl.Unlock()
 
 			rem, err := s.base.ServeBase(data, tx)
 			if err != nil {
@@ -362,26 +372,34 @@ func (s *Server) handleConnections(system octo.System) {
 
 // Client defines the structure which communicates with other udp connections.
 type Client struct {
-	log           octo.Logs
-	conn          *net.UDPConn
-	addr          *net.UDPAddr
-	server        *Server
-	ctx           context.Context
-	info          octo.Info
-	authenticated bool
-	index         int
+	log    octo.Logs
+	conn   *net.UDPConn
+	addr   *net.UDPAddr
+	server *Server
+	ctx    context.Context
+	info   octo.Info
+	index  int
 }
 
 // authenticate runs the authentication procedure to authenticate that the connection
 // was valid.
 func (c *Client) authenticate(data []byte) error {
 	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Started")
+
 	if !c.server.Attr.Authenticate {
 		c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 		return nil
 	}
 
-	if c.authenticated {
+	var authenticated bool
+
+	c.server.cwl.Lock()
+	{
+		authenticated = c.server.clientAuthenticated[c.addr.String()]
+	}
+	c.server.cwl.Unlock()
+
+	if authenticated {
 		c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 		return nil
 	}
@@ -389,28 +407,60 @@ func (c *Client) authenticate(data []byte) error {
 	var cmd octo.Command
 
 	if err := json.Unmarshal(data, &cmd); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", err.Error())
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : Unmarshalling failed : %q", err.Error())
+
+		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(err.Error())); cerr == nil {
+			c.Send(block, true)
+		}
+
 		return nil
 	}
 
 	if !bytes.Equal(cmd.Name, consts.AuthResponse) {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", consts.ErrAuthorizationFailed.Error())
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : Not Authorization Response : %q", consts.ErrAuthorizationFailed.Error())
+
+		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(consts.ErrAuthorizationFailed.Error())); cerr == nil {
+			c.Send(block, true)
+		}
+
 		return consts.ErrAuthorizationFailed
 	}
 
-	var auth octo.AuthCredential
+	c.log.Log(octo.LOGDEBUG, c.info.UUID, "udp.Client.authenticate", "Auth Command : %+q", cmd.String())
 
-	if err := json.Unmarshal(bytes.Join(cmd.Data, []byte("")), &cmd); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", err.Error())
+	auth, err := utils.AuthCredentialFromJSON(bytes.Join(cmd.Data, []byte("")))
+	c.log.Log(octo.LOGDEBUG, c.info.UUID, "udp.Client.authenticate", "AuthCredentials : %+q", auth)
+
+	if err != nil {
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : AuthCredential Unmarshal : %q", err.Error())
+
+		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(err.Error())); cerr == nil {
+			c.Send(block, true)
+		}
+
 		return nil
 	}
 
 	if err := c.server.system.Authenticate(auth); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : %q", err.Error())
-		return nil
+		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : AuthCredential Authorization : %+q", err.Error())
+
+		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(err.Error())); cerr == nil {
+			c.Send(block, true)
+		}
+
+		return err
 	}
 
-	c.authenticated = true
+	if block, _, cerr := utils.NewCommandByte(consts.AuthroizationGranted, consts.OK); cerr == nil {
+		c.Send(block, true)
+	}
+
+	c.server.cwl.Lock()
+	{
+		c.server.clientAuthenticated[c.addr.String()] = true
+	}
+	c.server.cwl.Unlock()
+
 	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 	return nil
 }
