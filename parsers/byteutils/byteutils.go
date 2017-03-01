@@ -21,6 +21,17 @@ var (
 	endColonBracket   = []byte("}:")
 )
 
+// StringsToBytes returns a slice of bytes slices of the giving string.
+func StringsToBytes(sets ...string) [][]byte {
+	var options [][]byte
+
+	for _, item := range sets {
+		options = append(options, []byte(item))
+	}
+
+	return options
+}
+
 // MakeMessage wraps each byte slice in the multiple byte slice with with
 // given header returning a single byte slice joined with a colon : symbol.
 func MakeMessage(header string, msgs ...string) []byte {

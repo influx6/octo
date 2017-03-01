@@ -7,6 +7,7 @@ import (
 
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/netutils"
+	"github.com/influx6/octo/parsers/byteutils"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -21,6 +22,15 @@ func NewInfo(addr string) octo.Info {
 		SUUID:  uuid.NewV4().String(),
 		UUID:   uuid.NewV4().String(),
 	}
+}
+
+// NewCommand returns a new command object with the provided name and data.
+func NewCommand(name string, data ...string) octo.Command {
+	var cmd octo.Command
+	cmd.Name = []byte(name)
+	cmd.Data = byteutils.StringsToBytes(data...)
+
+	return cmd
 }
 
 // ParseAuthorization returns the giving scheme and values of the provided authentication

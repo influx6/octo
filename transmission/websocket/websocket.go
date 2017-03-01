@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -277,6 +278,7 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var client Client
 	client.server = s
+	client.log = s.log
 	client.index = index
 	client.Request = r
 	client.system = s.system
@@ -375,7 +377,9 @@ func (c *Client) authorizationByHeader() error {
 
 	authorizationHeader := c.Request.Header.Get("Authorization")
 	if len(authorizationHeader) == 0 {
-		return errors.New("'Authorization' header needed for authentication")
+		err := errors.New("'Authorization' header needed for authentication")
+		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
+		return err
 	}
 
 	credentials, err := utils.ParseAuthorization(authorizationHeader)
@@ -486,6 +490,12 @@ func (c *Client) Listen() error {
 		return err
 	}
 
+	c.cl.Lock()
+	{
+		c.running = true
+	}
+	c.cl.Unlock()
+
 	c.wg.Add(1)
 	go c.acceptRequests()
 
@@ -495,15 +505,27 @@ func (c *Client) Listen() error {
 
 // acceptRequests handles the processing of requests from the server.
 func (c *Client) acceptRequests() {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.handleRequests", "Started")
+	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Started")
 	defer c.wg.Done()
 
 	for c.isRunning() {
+		if c.shouldClose() {
+			break
+		}
 
 		messageType, message, err := c.Conn.ReadMessage()
+		c.log.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.acceptRequests", "Type: %d, Message: %+q", messageType, message)
+		c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Completed")
 		if err != nil {
-			c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.handleRequests", "Error : %q", err.Error())
+			c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.acceptRequests", "Error : %q", err.Error())
+
 			if err == io.EOF || err == websocket.ErrBadHandshake || err == websocket.ErrCloseSent {
+				go c.Close()
+				break
+			}
+
+			if messageType == -1 && strings.Contains(err.Error(), "websocket: close") {
+				go c.Close()
 				break
 			}
 		}
@@ -543,10 +565,6 @@ func (c *Client) acceptRequests() {
 				go c.Close()
 				return
 			}
-		}
-
-		if c.shouldClose() {
-			break
 		}
 	}
 

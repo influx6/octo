@@ -25,7 +25,8 @@ func (jsonparser) Parse(msg []byte) ([]octo.Command, error) {
 	if err := json.Unmarshal(msg, &commands); err != nil {
 		var single octo.Command
 
-		if errx := json.Unmarshal(msg, &single); errx == nil {
+		errx := json.Unmarshal(msg, &single)
+		if errx == nil {
 			commands = append(commands, single)
 			return commands, nil
 		}

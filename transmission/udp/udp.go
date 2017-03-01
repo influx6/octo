@@ -284,6 +284,10 @@ func (s *Server) handleConnections(system octo.System) {
 	block := make([]byte, consts.MinDataSize)
 
 	for s.IsRunning() {
+		if s.stopRunning() {
+			break
+		}
+
 		n, addr, err := s.conn.ReadFromUDP(block)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -343,10 +347,6 @@ func (s *Server) handleConnections(system octo.System) {
 
 		if n < len(block)/2 && len(block) > consts.MaxDataWrite {
 			block = make([]byte, len(block)/2)
-		}
-
-		if s.stopRunning() {
-			break
 		}
 	}
 
