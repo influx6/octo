@@ -293,6 +293,7 @@ func (c *Client) acceptRequests() {
 			}
 		}
 
+		// c.pl.Lock()
 		c.conn.SetReadDeadline(time.Now().Add(consts.ReadTimeout))
 		c.conn.SetWriteDeadline(time.Now().Add(consts.WriteTimeout))
 
@@ -300,6 +301,7 @@ func (c *Client) acceptRequests() {
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				// c.logs.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.acceptRequests", "ReadTimeout")
+				// c.pl.Unlock()
 				continue
 			}
 
@@ -308,6 +310,7 @@ func (c *Client) acceptRequests() {
 			// TODO: Do we really want to continue here?
 			if err == io.EOF {
 				if eofSeen < consts.MaxAcceptableEOF {
+					// c.pl.Unlock()
 					eofSeen++
 					continue
 				}
@@ -315,12 +318,14 @@ func (c *Client) acceptRequests() {
 
 			c.conn.SetReadDeadline(time.Time{})
 			c.conn.SetWriteDeadline(time.Time{})
+			// c.pl.Unlock()
 
 			break
 		}
 
 		c.conn.SetReadDeadline(time.Time{})
 		c.conn.SetWriteDeadline(time.Time{})
+		// c.pl.Unlock()
 
 		c.logs.Log(octo.LOGTRANSMITTED, c.info.UUID, "tcp.Client.acceptRequests", "Transmitted : %+q", block[:n])
 		if err := c.handleRequest(block[:n], c.Transmission()); err != nil {
