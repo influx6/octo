@@ -2,23 +2,82 @@ package tcp_test
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
-	"github.com/influx6/faux/utils"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/mock"
+	"github.com/influx6/octo/parsers/blockparser"
+	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/tests"
 	"github.com/influx6/octo/transmission/tcp"
 )
 
+var (
+	scheme    = "XBot"
+	key       = "api-32"
+	token     = "auth-4531"
+	tokenData = []byte("BOMTx")
+)
+
+type mockSystem struct {
+	t *testing.T
+}
+
+// Authenticate authenticates the provided credentials and implements
+// the octo.Authenticator interface.
+func (mockSystem) Authenticate(cred octo.AuthCredential) error {
+	if cred.Scheme != scheme {
+		return errors.New("Scheme does not match")
+	}
+
+	if cred.Key != key {
+		return errors.New("Key does not match")
+	}
+
+	if cred.Token != token {
+		return errors.New("Token does not match")
+	}
+
+	if !bytes.Equal(cred.Data, tokenData) {
+		return errors.New("Data  does not match")
+	}
+
+	return nil
+}
+
+// Serve handles the processing of different requests coming from the outside.
+func (mockSystem) Serve(message []byte, tx octo.Transmission) error {
+	cmds, err := blockparser.Blocks.Parse(message)
+	if err != nil {
+		return err
+	}
+
+	for _, command := range cmds {
+
+		switch {
+		// case bytes.Equal(consts.AuthRequest, command.Name):
+		case bytes.Equal([]byte("PUMP"), command.Name):
+			return tx.Send([]byte("RUMP"), true)
+		case bytes.Equal([]byte("REX"), command.Name):
+			return tx.Send([]byte("DEX"), true)
+		case bytes.Equal([]byte("BULL"), command.Name):
+			return tx.SendAll(byteutils.MakeByteMessage([]byte("PRINT"), command.Data...), true)
+		case bytes.Equal([]byte("BONG"), command.Name):
+			return tx.Send([]byte("BING"), true)
+		default:
+			break
+		}
+
+	}
+
+	return errors.New("Invalid Command")
+}
+
 // TestServer tests the validity of our server code.
 func TestServer(t *testing.T) {
 	log := mock.NewLogger(t)
-	system := mock.NewMSystem(map[string]mock.MessageHandler{
-		"BONG": func(m utils.Message, tx octo.Transmission) error {
-			return tx.Send(utils.WrapResponseBlock([]byte("PING"), nil), true)
-		},
-	})
+	system := mockSystem{t: t}
 
 	server := tcp.New(log, tcp.ServerAttr{
 		Addr: ":6050",
@@ -38,7 +97,7 @@ func TestServer(t *testing.T) {
 
 	t.Logf("\tWhen 'PONG' is sent to the server")
 	{
-		if errx := client.Write(utils.WrapResponseBlock([]byte("PING"), nil), true); err != nil {
+		if errx := client.Write(byteutils.WrapResponseBlock([]byte("PING"), nil), true); err != nil {
 			tests.Failed(t, "Should have delivered 'PING' message: %s.", errx)
 		}
 		tests.Passed(t, "Should have delivered 'PING' message.")
@@ -54,7 +113,7 @@ func TestServer(t *testing.T) {
 
 	t.Logf("\tWhen 'PING' is sent to the server")
 	{
-		if errx := client.Write(utils.WrapResponseBlock([]byte("PONG"), nil), true); err != nil {
+		if errx := client.Write(byteutils.WrapResponseBlock([]byte("PONG"), nil), true); err != nil {
 			tests.Failed(t, "Should have delivered 'PONG' message: %s.", errx)
 		}
 		tests.Passed(t, "Should have delivered 'PONG' message.")
@@ -70,7 +129,7 @@ func TestServer(t *testing.T) {
 
 	t.Logf("\tWhen 'INFO' is sent to the server")
 	{
-		if errx := client.Write(utils.WrapResponseBlock([]byte("INFO"), nil), true); err != nil {
+		if errx := client.Write(byteutils.WrapResponseBlock([]byte("INFO"), nil), true); err != nil {
 			tests.Failed(t, "Should have delivered 'CLOSE' message: %s.", errx)
 		}
 		tests.Passed(t, "Should have delivered 'CLOSE' message.")
@@ -86,7 +145,7 @@ func TestServer(t *testing.T) {
 
 	t.Logf("\tWhen 'CLOSED' is sent to the server")
 	{
-		if errx := client.Write(utils.WrapResponseBlock([]byte("CLOSE"), nil), true); err != nil {
+		if errx := client.Write(byteutils.WrapResponseBlock([]byte("CLOSE"), nil), true); err != nil {
 			tests.Failed(t, "Should have delivered 'CLOSE' message: %s.", errx)
 		}
 		tests.Passed(t, "Should have delivered 'CLOSE' message.")
@@ -102,24 +161,33 @@ func TestServer(t *testing.T) {
 }
 
 // TestClusterServers tests the validity of our server code in connecting and
-// relating between clusters.
-func TestClustereServers(t *testing.T) {
+// relating between clusters with authentication.
+func TestClusterServers(t *testing.T) {
 	log := mock.NewLogger(t)
+	system := mockSystem{t: t}
 
-	system := mock.NewMSystem(map[string]mock.MessageHandler{
-		"POP": func(m utils.Message, tx octo.Transmission) error {
-			return tx.Send(utils.WrapResponseBlock([]byte("PUSH"), nil), true)
+	server := tcp.New(log, tcp.ServerAttr{
+		Addr:         ":6050",
+		ClusterAddr:  ":6060",
+		Authenticate: true,
+		Credential: octo.AuthCredential{
+			Scheme: scheme,
+			Key:    key,
+			Token:  token,
+			Data:   tokenData,
 		},
 	})
 
-	server := tcp.New(log, tcp.ServerAttr{
-		Addr:        ":6050",
-		ClusterAddr: ":6060",
-	})
-
 	server2 := tcp.New(log, tcp.ServerAttr{
-		Addr:        ":7050",
-		ClusterAddr: ":7060",
+		Addr:         ":7050",
+		ClusterAddr:  ":7060",
+		Authenticate: true,
+		Credential: octo.AuthCredential{
+			Scheme: scheme,
+			Key:    key,
+			Token:  token,
+			Data:   tokenData,
+		},
 	})
 
 	server.Listen(system)
@@ -150,12 +218,7 @@ func TestClustereServers(t *testing.T) {
 // TestClusterServerSendAll tests the validity of our server code.
 func TestClusterServerSendAll(t *testing.T) {
 	log := mock.NewLogger(t)
-	system := mock.NewMSystem(map[string]mock.MessageHandler{
-		"BULL": func(m utils.Message, tx octo.Transmission) error {
-			data := utils.WrapResponseBlock([]byte("PRINT"), bytes.Join(m.Data, []byte("")))
-			return tx.SendAll(data, true)
-		},
-	})
+	system := mockSystem{t: t}
 
 	server := tcp.New(log, tcp.ServerAttr{
 		Addr:        ":6050",
@@ -195,7 +258,7 @@ func TestClusterServerSendAll(t *testing.T) {
 
 	t.Logf("\tWhen 'BULL' is mass sent to the server")
 	{
-		if errx := client.Write(utils.WrapResponseBlock([]byte("BULL"), []byte("LOTTER")), true); err != nil {
+		if errx := client.Write(byteutils.WrapResponseBlock([]byte("BULL"), []byte("LOTTER")), true); err != nil {
 			tests.Failed(t, "Should have delivered 'PING' message: %s.", errx)
 		}
 		tests.Passed(t, "Should have delivered 'PING' message.")
@@ -212,7 +275,7 @@ func TestClusterServerSendAll(t *testing.T) {
 }
 
 func validateResponseHeader(t *testing.T, data []byte, target []byte) {
-	receivedMessages, err := utils.BlockParser.Parse(data)
+	receivedMessages, err := blockparser.Blocks.Parse(data)
 	if err != nil {
 		tests.Failed(t, "Should have successfully parsed response from server: %s.", err)
 	}
@@ -223,14 +286,14 @@ func validateResponseHeader(t *testing.T, data []byte, target []byte) {
 	}
 	tests.Passed(t, "Should have successfully received atleast 1 response from server.")
 
-	if !bytes.Equal(receivedMessages[0].Command, target) {
-		tests.Failed(t, "Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Command)
+	if !bytes.Equal(receivedMessages[0].Name, target) {
+		tests.Failed(t, "Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Name)
 	}
 	tests.Passed(t, "Should have successfully matched response header as %+q.", target)
 }
 
 func validateResponse(t *testing.T, data []byte, target []byte) {
-	receivedMessages, err := utils.BlockParser.Parse(data)
+	receivedMessages, err := blockparser.Blocks.Parse(data)
 	if err != nil {
 		tests.Failed(t, "Should have successfully parsed response from server: %s.", err)
 	}
@@ -242,7 +305,7 @@ func validateResponse(t *testing.T, data []byte, target []byte) {
 	tests.Passed(t, "Should have successfully received atleast 1 response from server.")
 
 	if !bytes.Equal(bytes.Join(receivedMessages[0].Data, []byte("")), target) {
-		tests.Failed(t, "Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Command)
+		tests.Failed(t, "Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Name)
 	}
 	tests.Passed(t, "Should have successfully matched response header as %+q.", target)
 }
