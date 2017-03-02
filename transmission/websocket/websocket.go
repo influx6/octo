@@ -473,6 +473,18 @@ func (c *Client) Close() error {
 
 	c.server.cl.Lock()
 	{
+		if len(c.server.clients) == 0 {
+			c.server.clients = nil
+			c.server.cl.Unlock()
+			return nil
+		}
+
+		if len(c.server.clients) == 1 {
+			c.server.clients = nil
+			c.server.cl.Unlock()
+			return nil
+		}
+
 		c.server.clients = append(c.server.clients[:c.index], c.server.clients[c.index+1:]...)
 	}
 	c.server.cl.Unlock()
