@@ -10,6 +10,7 @@ import (
 
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
+	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/tests"
 	"github.com/influx6/octo/transmission/udp"
@@ -75,7 +76,7 @@ func (mockSystem) Serve(message []byte, tx octo.Transmission) error {
 func TestUDPServer(t *testing.T) {
 	// pocket := mock.NewCredentialPocket(octo.AuthCredential{})
 	system := &mockSystem{t: t}
-	server := udp.New(mock.NewLogger(t), udp.ServerAttr{
+	server := udp.New(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)}), udp.ServerAttr{
 		Addr:         ":5060",
 		Version:      udp.Ver0,
 		Authenticate: true,

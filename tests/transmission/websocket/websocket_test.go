@@ -14,6 +14,7 @@ import (
 	gwebsocket "github.com/gorilla/websocket"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
+	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/tests"
 	"github.com/influx6/octo/transmission/websocket"
@@ -79,7 +80,7 @@ func TestWebsocketSystem(t *testing.T) {
 	system := &mockSystem{t: t}
 	ws := websocket.NewBaseSocketServer(websocket.BaseSocketAttr{
 		Authenticate: true,
-	}, mock.NewLogger(t), utils.NewInfo(":6050"), pocket, system)
+	}, instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)}), utils.NewInfo(":6050"), pocket, system)
 
 	server := httptest.NewServer(ws)
 	server.URL = server.URL + "/ws"
