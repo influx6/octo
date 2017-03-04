@@ -29,82 +29,10 @@ func (c Command) String() string {
 	return fmt.Sprintf("{ Command: %+q, Data: %+q }", c.Name, c.Data)
 }
 
-//================================================================================
-
 // Parser defines a interface which exposes a method to parse a provided input
 // returning a giving value(interface type) or an error.
 type Parser interface {
 	Parse([]byte) ([]Command, error)
-}
-
-//================================================================================
-
-// Instrumentation defines an interface for needed features that provided logging,
-// metric measurements and time tracking, these instrumentation details allows us
-// to measure the internal operations of systems.
-type Instrumentation interface {
-	Logs
-	TimeInstrumentation
-	DataInstrumentation
-	GoRoutineInstrumentation
-	ConnectionInstrumentation
-}
-
-// NewInstrumentation returns a new InstrumentationBase instance which unifies
-// the instrumentation provides for providing a unified instrumentation object.
-func NewInstrumentation(log Logs, times TimeInstrumentation, datas DataInstrumentation, gor GoRoutineInstrumentation, conns ConnectionInstrumentation) Instrumentation {
-	return instrumentationBase{
-		Logs:                      log,
-		TimeInstrumentation:       times,
-		DataInstrumentation:       datas,
-		GoRoutineInstrumentation:  gor,
-		ConnectionInstrumentation: conns,
-	}
-}
-
-// instrumentationBase defines a struct which provides a implementation for the
-// Instrumentation interface.
-type instrumentationBase struct {
-	Logs
-	TimeInstrumentation
-	DataInstrumentation
-	GoRoutineInstrumentation
-	ConnectionInstrumentation
-}
-
-// Logs defines an interface which provides the capability of structures to meet the
-// interface for logging data details.
-type Logs interface {
-	Log(level string, namespace string, function string, message string, items ...interface{})
-}
-
-// ConnectionInstrumentation defines an interface which provides a instrumentation
-// for reporting connection based event.
-type ConnectionInstrumentation interface {
-	NewConnection(context string, in Info, meta []byte)
-	NewDisconnection(context string, in Info, meta []byte)
-	NewAuthentication(context string, in Info, status bool, data []byte)
-}
-
-// GoRoutineInstrumentation provides a basic instrumentation interface for measuring the
-// total used and resolved goroutines for tracking leakages and go-routine usage.
-type GoRoutineInstrumentation interface {
-	IncrementGoRoutinesFor(context string, meta []byte)
-	DecrementGoRoutinesFor(context string, meta []byte)
-}
-
-// DataInstrumentation provides a instrumentation for measuring reads, writes
-// operations
-type DataInstrumentation interface {
-	NewWrites(context string, meta []byte, data []byte)
-	NewReads(context string, meta []byte, data []byte)
-}
-
-// TimeInstrumentation defines an interface which provides a instrumentation for
-// reporting connection based event.
-type TimeInstrumentation interface {
-	Start(context string, op string, uuid string)
-	End(context string, op string, uuid string)
 }
 
 //================================================================================

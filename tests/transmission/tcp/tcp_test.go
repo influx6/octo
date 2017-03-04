@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/influx6/octo"
+	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/parsers/blockparser"
 	"github.com/influx6/octo/parsers/byteutils"
@@ -76,10 +77,10 @@ func (mockSystem) Serve(message []byte, tx octo.Transmission) error {
 
 // TestServer tests the validity of our server code.
 func TestServer(t *testing.T) {
-	log := mock.NewLogger(t)
 	system := mockSystem{t: t}
+	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)})
 
-	server := tcp.New(log, tcp.ServerAttr{
+	server := tcp.New(inst, tcp.ServerAttr{
 		Addr: ":6050",
 		// ClusterAddr: ":6060",
 	})
@@ -163,10 +164,10 @@ func TestServer(t *testing.T) {
 // TestClusterServers tests the validity of our server code in connecting and
 // relating between clusters with authentication.
 func TestClusterServers(t *testing.T) {
-	log := mock.NewLogger(t)
 	system := mockSystem{t: t}
+	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)})
 
-	server := tcp.New(log, tcp.ServerAttr{
+	server := tcp.New(inst, tcp.ServerAttr{
 		Addr:         ":6050",
 		ClusterAddr:  ":6060",
 		Authenticate: true,
@@ -178,7 +179,7 @@ func TestClusterServers(t *testing.T) {
 		},
 	})
 
-	server2 := tcp.New(log, tcp.ServerAttr{
+	server2 := tcp.New(inst, tcp.ServerAttr{
 		Addr:         ":7050",
 		ClusterAddr:  ":7060",
 		Authenticate: true,
@@ -217,15 +218,15 @@ func TestClusterServers(t *testing.T) {
 
 // TestClusterServerSendAll tests the validity of our server code.
 func TestClusterServerSendAll(t *testing.T) {
-	log := mock.NewLogger(t)
 	system := mockSystem{t: t}
+	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)})
 
-	server := tcp.New(log, tcp.ServerAttr{
+	server := tcp.New(inst, tcp.ServerAttr{
 		Addr:        ":6050",
 		ClusterAddr: ":6060",
 	})
 
-	server2 := tcp.New(log, tcp.ServerAttr{
+	server2 := tcp.New(inst, tcp.ServerAttr{
 		Addr:        ":7050",
 		ClusterAddr: ":7060",
 	})

@@ -45,20 +45,20 @@ type SocketAttr struct {
 // SocketServer defines a struct implements the http.ServeHTTP interface which
 // handles servicing http requests for websockets.
 type SocketServer struct {
-	Attr     SocketAttr
-	log      octo.Logs
-	info     octo.Info
-	base     *BaseSocketServer
-	server   *http.Server
-	listener net.Listener
-	wg       sync.WaitGroup
-	rl       sync.Mutex
-	running  bool
-	doClose  bool
+	Attr        SocketAttr
+	instruments octo.Instrumentation
+	info        octo.Info
+	base        *BaseSocketServer
+	server      *http.Server
+	listener    net.Listener
+	wg          sync.WaitGroup
+	rl          sync.Mutex
+	running     bool
+	doClose     bool
 }
 
 // New returns a new instance of a SocketServer.
-func New(attr SocketAttr, log octo.Logs) *SocketServer {
+func New(attr SocketAttr, instruments octo.Instrumentation) *SocketServer {
 	ip, port, _ := net.SplitHostPort(attr.Addr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -69,7 +69,7 @@ func New(attr SocketAttr, log octo.Logs) *SocketServer {
 	var suuid = uuid.NewV4().String()
 
 	var ws SocketServer
-	ws.log = log
+	ws.instruments = instruments
 	ws.info = octo.Info{
 		SUUID:  suuid,
 		UUID:   suuid,
@@ -82,26 +82,26 @@ func New(attr SocketAttr, log octo.Logs) *SocketServer {
 
 // Listen begins the initialization of the websocket server.
 func (s *SocketServer) Listen(system octo.System) error {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Started")
 
 	if s.isRunning() {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Completed")
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Completed")
 		return nil
 	}
 
 	listener, err := netutils.MakeListener("tcp", s.Attr.Addr, s.Attr.TLSConfig)
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "websocket.SocketServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "websocket.SocketServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
 		return err
 	}
 
 	server, tlListener, err := netutils.NewHTTPServer(listener, s, s.Attr.TLSConfig)
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "websocket.SocketServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "websocket.SocketServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
 		return err
 	}
 
-	s.base = NewBaseSocketServer(BaseSocketAttr{}, s.log, s.info, s, system)
+	s.base = NewBaseSocketServer(BaseSocketAttr{}, s.instruments, s.info, s, system)
 
 	s.rl.Lock()
 	{
@@ -112,7 +112,7 @@ func (s *SocketServer) Listen(system octo.System) error {
 	}
 	s.rl.Unlock()
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Completed")
 	return nil
 }
 
@@ -123,7 +123,7 @@ func (s *SocketServer) Credential() octo.AuthCredential {
 
 // Close ends the websocket connection and ensures all requests are finished.
 func (s *SocketServer) Close() error {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Close", "Start")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Close", "Start")
 	if !s.isRunning() {
 		return nil
 	}
@@ -137,13 +137,13 @@ func (s *SocketServer) Close() error {
 	s.rl.Unlock()
 
 	if err := s.server.Close(); err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "websocket.SocketServer.Close", "Completed : %+q", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "websocket.SocketServer.Close", "Completed : %+q", err.Error())
 	}
 
 	// Close all clients connections.
 	s.base.Close()
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Close", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Close", "Completed")
 	return nil
 }
 
@@ -169,16 +169,16 @@ func (s *SocketServer) isRunning() bool {
 // ServeHTTP implements the http.ServeHTTP interface method to handle http request
 // converted to websockets request.
 func (s *SocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.ServeHTTP", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.ServeHTTP", "Started")
 
 	if s.shouldClose() {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.ServeHTTP", "Completed")
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.ServeHTTP", "Completed")
 		return
 	}
 
 	s.base.ServeHTTP(w, r)
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.ServeHTTP", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.ServeHTTP", "Completed")
 }
 
 //================================================================================
@@ -197,7 +197,7 @@ type BaseSocketAttr struct {
 type BaseSocketServer struct {
 	MessageCompression bool
 	Attr               BaseSocketAttr
-	log                octo.Logs
+	instruments        octo.Instrumentation
 	info               octo.Info
 	system             octo.System
 	base               *octo.BaseSystem
@@ -207,9 +207,9 @@ type BaseSocketServer struct {
 }
 
 // NewBaseSocketServer returns a new instance of a BaseSocketServer.
-func NewBaseSocketServer(attr BaseSocketAttr, log octo.Logs, info octo.Info, credentials octo.Credentials, system octo.System) *BaseSocketServer {
+func NewBaseSocketServer(attr BaseSocketAttr, instruments octo.Instrumentation, info octo.Info, credentials octo.Credentials, system octo.System) *BaseSocketServer {
 	var base BaseSocketServer
-	base.log = log
+	base.instruments = instruments
 	base.Attr = attr
 	base.info = info
 	base.system = system
@@ -217,7 +217,7 @@ func NewBaseSocketServer(attr BaseSocketAttr, log octo.Logs, info octo.Info, cre
 	base.base = octo.NewBaseSystem(
 		system,
 		jsonparser.JSON,
-		log,
+		instruments,
 		jsonsystem.BaseHandlers(),
 		jsonsystem.AuthHandlers(credentials, system),
 	)
@@ -234,11 +234,11 @@ func NewBaseSocketServer(attr BaseSocketAttr, log octo.Logs, info octo.Info, cre
 
 // Clients returns the client list of the BaseSocketServer object.
 func (s *BaseSocketServer) Clients() []*Client {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.Clients", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.Clients", "Started")
 	s.cl.Lock()
 	defer s.cl.Unlock()
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.BasicSocketServer.Clients", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BasicSocketServer.Clients", "Completed")
 	return s.clients[0:]
 }
 
@@ -249,7 +249,7 @@ func (s *BaseSocketServer) Info() octo.Info {
 
 // Close ends the websocket connection and ensures all requests are finished.
 func (s *BaseSocketServer) Close() error {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.Close", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.Close", "Started")
 
 	s.cl.Lock()
 	defer s.cl.Lock()
@@ -258,13 +258,13 @@ func (s *BaseSocketServer) Close() error {
 		go client.Close()
 	}
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.Close", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.Close", "Completed")
 	return nil
 }
 
 // ServeHTTP defines a method to serve and handle websocket requests.
 func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "Started")
 
 	var index int
 
@@ -278,7 +278,7 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var client Client
 	client.server = s
-	client.log = s.log
+	client.instruments = s.instruments
 	client.index = index
 	client.Request = r
 	client.system = s.system
@@ -291,20 +291,20 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := client.authorizationByHeader(); err != nil {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
 		return
 	}
 
 	conn, err := s.upgrader.Upgrade(w, r, s.Attr.Headers)
 	if err != nil {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
 		return
 	}
 
 	client.Conn = conn
 
 	if err := client.Listen(); err != nil {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
 		return
 	}
 
@@ -316,7 +316,7 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	client.Wait()
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "Completed")
 }
 
 //================================================================================
@@ -325,26 +325,26 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // each request client.
 type Client struct {
 	*websocket.Conn
-	Request *http.Request
-	log     octo.Logs
-	info    octo.Info
-	system  octo.System
-	primary *octo.BaseSystem
-	wg      sync.WaitGroup
-	sg      sync.WaitGroup
-	server  *BaseSocketServer
-	cl      sync.Mutex
-	index   int
-	running bool
-	doClose bool
+	Request     *http.Request
+	instruments octo.Instrumentation
+	info        octo.Info
+	system      octo.System
+	primary     *octo.BaseSystem
+	wg          sync.WaitGroup
+	sg          sync.WaitGroup
+	server      *BaseSocketServer
+	cl          sync.Mutex
+	index       int
+	running     bool
+	doClose     bool
 }
 
 // authenticate runs the authentication procedure to authenticate that the connection
 // was valid.
 func (c *Client) authorizationByRequest() error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Started")
 	if !c.server.Attr.Authenticate {
-		c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
 		return nil
 	}
 
@@ -353,47 +353,47 @@ func (c *Client) authorizationByRequest() error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(cmd); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %q", err.Error())
 		return nil
 	}
 
 	if err := c.Send(buf.Bytes(), true); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %q", err.Error())
 		return nil
 	}
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
 	return nil
 }
 
 // authorizationByHeader runs the authentication procedure to authenticate the connection
 // by using the Authorization header present in the request object was valid.
 func (c *Client) authorizationByHeader() error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Started")
 	if !c.server.Attr.Authenticate {
-		c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
 		return nil
 	}
 
 	authorizationHeader := c.Request.Header.Get("Authorization")
 	if len(authorizationHeader) == 0 {
 		err := errors.New("'Authorization' header needed for authentication")
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
 		return err
 	}
 
 	credentials, err := utils.ParseAuthorization(authorizationHeader)
 	if err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
 		return err
 	}
 
 	if err := c.system.Authenticate(credentials); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
 		return err
 	}
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
 	return nil
 }
 
@@ -404,10 +404,10 @@ func (c *Client) Wait() {
 
 // SendAll delivers a binary data to all websocket connections.
 func (c *Client) SendAll(data []byte, flush bool) error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.SendAll", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.SendAll", "Started")
 
 	if err := c.Send(data, flush); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.SendAll", "Started : Error : %s", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.SendAll", "Started : Error : %s", err.Error())
 		return err
 	}
 
@@ -418,37 +418,37 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 		}
 
 		if err := client.Send(data, flush); err != nil {
-			c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.SendAll", "Started : %q : Error : %s", client.info.UUID, err.Error())
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.SendAll", "Started : %q : Error : %s", client.info.UUID, err.Error())
 		}
 	}
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.SendAll", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.SendAll", "Started")
 	return nil
 }
 
 // Send delivers a binary data to the websocket connection.
 func (c *Client) Send(data []byte, flush bool) error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Send", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Send", "Started")
 
 	if c.shouldClose() {
 		err := errors.New("Connection will be closed")
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Send", "Completed : Error : %s", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Send", "Completed : Error : %s", err.Error())
 		return err
 	}
 
 	c.sg.Add(1)
 	defer c.sg.Done()
 
-	c.log.Log(octo.LOGTRANSMISSION, c.info.UUID, "websocket.Client.Send", "Started : %+q", data)
+	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "websocket.Client.Send", "Started : %+q", data)
 	err := c.Conn.WriteMessage(websocket.BinaryMessage, data)
-	c.log.Log(octo.LOGTRANSMISSION, c.info.UUID, "websocket.Client.Send", "Completed")
+	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "websocket.Client.Send", "Completed")
 
 	if err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Send", "Started : %q : Error : %s", c.info.UUID, err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Send", "Started : %q : Error : %s", c.info.UUID, err.Error())
 		return err
 	}
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Send", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Send", "Started")
 	return nil
 }
 
@@ -468,7 +468,7 @@ func (c *Client) Close() error {
 	c.sg.Wait()
 
 	if err := c.Conn.Close(); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Close", "Closing Websocket Connection : Error : %q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Close", "Closing Websocket Connection : Error : %q", err.Error())
 	}
 
 	c.server.cl.Lock()
@@ -494,11 +494,11 @@ func (c *Client) Close() error {
 
 // Listen starts the giving client and begins reading the websocket connection.
 func (c *Client) Listen() error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Listen", "Start : %#v", c.info)
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Listen", "Start : %#v", c.info)
 
 	if c.system == nil || c.primary == nil {
 		err := errors.New("Client system/Primary systems are not set")
-		c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Listen", "Websocket Unable to Listen : Error : %q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Listen", "Websocket Unable to Listen : Error : %q", err.Error())
 		return err
 	}
 
@@ -511,13 +511,13 @@ func (c *Client) Listen() error {
 	c.wg.Add(1)
 	go c.acceptRequests()
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Listen", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Listen", "Completed")
 	return nil
 }
 
 // acceptRequests handles the processing of requests from the server.
 func (c *Client) acceptRequests() {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Started")
 	defer c.wg.Done()
 
 	for c.isRunning() {
@@ -526,10 +526,10 @@ func (c *Client) acceptRequests() {
 		}
 
 		messageType, message, err := c.Conn.ReadMessage()
-		c.log.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.acceptRequests", "Type: %d, Message: %+q", messageType, message)
-		c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Completed")
+		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.acceptRequests", "Type: %d, Message: %+q", messageType, message)
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Completed")
 		if err != nil {
-			c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.acceptRequests", "Error : %q", err.Error())
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.acceptRequests", "Error : %q", err.Error())
 
 			if err == io.EOF || err == websocket.ErrBadHandshake || err == websocket.ErrCloseSent {
 				go c.Close()
@@ -561,10 +561,10 @@ func (c *Client) acceptRequests() {
 
 		rem, err := c.primary.ServeBase(data, &tx)
 		if err != nil {
-			c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
 
 			if err := c.system.Serve(data, &tx); err != nil {
-				c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
+				c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
 				go c.Close()
 				return
 			}
@@ -573,14 +573,14 @@ func (c *Client) acceptRequests() {
 		// Handle remaining messages and pass it to user system.
 		if rem != nil {
 			if err := c.system.Serve(byteutils.JoinMessages(rem...), &tx); err != nil {
-				c.log.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
+				c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
 				go c.Close()
 				return
 			}
 		}
 	}
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Completed")
 }
 
 // shouldClose returns true/false if the client should close.

@@ -36,20 +36,20 @@ type PushAttr struct {
 // BasicServer defines a struct implements the http.ServeHTTP interface which
 // handles servicing http requests for websockets.
 type BasicServer struct {
-	Attr     PushAttr
-	log      octo.Logs
-	info     octo.Info
-	server   *http.Server
-	listener net.Listener
-	wg       sync.WaitGroup
-	basic    *BasicServeHTTP
-	rl       sync.Mutex
-	running  bool
-	doClose  bool
+	Attr        PushAttr
+	instruments octo.Instrumentation
+	info        octo.Info
+	server      *http.Server
+	listener    net.Listener
+	wg          sync.WaitGroup
+	basic       *BasicServeHTTP
+	rl          sync.Mutex
+	running     bool
+	doClose     bool
 }
 
 // New returns a new instance of a BasicServer.
-func New(attr PushAttr) *BasicServer {
+func New(instruments octo.Instrumentation, attr PushAttr) *BasicServer {
 	ip, port, _ := net.SplitHostPort(attr.Addr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -78,26 +78,26 @@ func (s *BasicServer) Credential() octo.AuthCredential {
 
 // Listen begins the initialization of the websocket server.
 func (s *BasicServer) Listen(system octo.System) error {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Started")
 
 	if s.isRunning() {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Completed")
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Completed")
 		return nil
 	}
 
 	listener, err := netutils.MakeListener("tcp", s.Attr.Addr, s.Attr.TLSConfig)
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
 		return err
 	}
 
 	server, tlListener, err := netutils.NewHTTPServer(listener, s, s.Attr.TLSConfig)
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
 		return err
 	}
 
-	s.basic = NewBasicServeHTTP(s.Attr.Authenticate, s.log, s.info, s, system)
+	s.basic = NewBasicServeHTTP(s.Attr.Authenticate, s.instruments, s.info, s, system)
 
 	s.rl.Lock()
 	{
@@ -108,29 +108,29 @@ func (s *BasicServer) Listen(system octo.System) error {
 	}
 	s.rl.Unlock()
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Completed")
 	return nil
 }
 
 // ServeHTTP implements the http.Handler.ServeHTTP interface method to handle http request
 // converted to websockets request.
 func (s *BasicServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Started")
 
 	if s.shouldClose() {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Completed")
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Completed")
 		return
 	}
 
 	// Call basic to treat the request.
 	s.basic.ServeHTTP(w, r)
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Completed")
 }
 
 // Close ends the websocket connection and ensures all requests are finished.
 func (s *BasicServer) Close() error {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Close", "Start")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Close", "Start")
 	if !s.isRunning() {
 		return nil
 	}
@@ -144,10 +144,10 @@ func (s *BasicServer) Close() error {
 	s.rl.Unlock()
 
 	if err := s.server.Close(); err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.Close", "Completed : %+q", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServer.Close", "Completed : %+q", err.Error())
 	}
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Close", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Close", "Completed")
 	return nil
 }
 
@@ -179,20 +179,20 @@ func (s *BasicServer) isRunning() bool {
 type BasicServeHTTP struct {
 	primary      *octo.BaseSystem
 	system       octo.System
-	log          octo.Logs
+	instruments  octo.Instrumentation
 	info         octo.Info
 	authenticate bool
 }
 
 // NewBasicServeHTTP returns a new instance of the BasicServeHTTP object.
-func NewBasicServeHTTP(authenticate bool, log octo.Logs, info octo.Info, cred octo.Credentials, system octo.System) *BasicServeHTTP {
-	primary := octo.NewBaseSystem(system, jsonparser.JSON, log, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(cred, system))
+func NewBasicServeHTTP(authenticate bool, inst octo.Instrumentation, info octo.Info, cred octo.Credentials, system octo.System) *BasicServeHTTP {
+	primary := octo.NewBaseSystem(system, jsonparser.JSON, inst, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(cred, system))
 
 	return &BasicServeHTTP{
 		authenticate: authenticate,
 		primary:      primary,
 		system:       system,
-		log:          log,
+		instruments:  inst,
 		info:         info,
 	}
 }
@@ -205,7 +205,7 @@ func (s *BasicServeHTTP) Info() octo.Info {
 // ServeHTTP implements the http.Handler.ServeHTTP interface method to handle http request
 // converted to websockets request.
 func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Started")
 
 	defer r.Body.Close()
 
@@ -226,7 +226,7 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Remote: r.RemoteAddr,
 	}
 
-	basic.log = s.log
+	basic.instruments = s.instruments
 	basic.system = s.system
 	basic.Request = r
 	basic.Writer = w
@@ -234,19 +234,19 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if err := basic.authenticate(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Authentication : Fails : Error : %+s", err)
-		s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Completed")
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Authentication : Fails : Error : %+s", err)
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Completed")
 		return
 	}
 
 	rem, err := s.primary.ServeBase(data.Bytes(), &basic)
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.acceptRequests", "BasicServer System : Fails Parsing : Error : %+s", err)
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.acceptRequests", "BasicServer System : Fails Parsing : Error : %+s", err)
 
 		if err := s.system.Serve(data.Bytes(), &basic); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "BasicServer System : Fails Parsing : Error : %+s", err)
-			s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Completed")
+			s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "BasicServer System : Fails Parsing : Error : %+s", err)
+			s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Completed")
 			return
 		}
 
@@ -256,11 +256,11 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if rem != nil {
 		if err := s.system.Serve(byteutils.JoinMessages(rem...), &basic); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			s.log.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "BasicServer System : Fails Parsing : Error : %+s", err)
+			s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "BasicServer System : Fails Parsing : Error : %+s", err)
 		}
 	}
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Completed")
 }
 
 //================================================================================
@@ -270,22 +270,22 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // the `SCHEME TOKEN:APIKEY:APIDATA'` which will then be used for authentication if
 // the
 type BasicTransmission struct {
-	Request *http.Request
-	Writer  http.ResponseWriter
-	ctx     context.Context
-	server  *BasicServeHTTP
-	system  octo.System
-	info    octo.Info
-	log     octo.Logs
-	buffer  bytes.Buffer
+	Request     *http.Request
+	Writer      http.ResponseWriter
+	ctx         context.Context
+	server      *BasicServeHTTP
+	system      octo.System
+	info        octo.Info
+	instruments octo.Instrumentation
+	buffer      bytes.Buffer
 }
 
 // authenticate runs the authentication procedure to authenticate that the connection
 // was valid.
 func (t *BasicTransmission) authenticate() error {
-	t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Started")
+	t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Started")
 	if !t.server.authenticate {
-		t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Completed")
+		t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Completed")
 		return nil
 	}
 
@@ -296,16 +296,16 @@ func (t *BasicTransmission) authenticate() error {
 
 	credentials, err := utils.ParseAuthorization(authorizationHeader)
 	if err != nil {
-		t.log.Log(octo.LOGERROR, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Completed : Error : %+q", err)
+		t.instruments.Log(octo.LOGERROR, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Completed : Error : %+q", err)
 		return err
 	}
 
 	if err := t.system.Authenticate(credentials); err != nil {
-		t.log.Log(octo.LOGERROR, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Completed : Error : %+q", err)
+		t.instruments.Log(octo.LOGERROR, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Completed : Error : %+q", err)
 		return err
 	}
 
-	t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Completed")
+	t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.authenticate", "Completed")
 	return nil
 }
 
@@ -313,32 +313,32 @@ func (t *BasicTransmission) authenticate() error {
 // This function call the BasicTransmission.Send function internally,
 // as multiple requests is not supported.
 func (t *BasicTransmission) SendAll(data []byte, flush bool) error {
-	t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.SendAll", "Started")
+	t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.SendAll", "Started")
 	if err := t.Send(data, flush); err != nil {
-		t.log.Log(octo.LOGERROR, t.info.UUID, "httpbasic.BasicTransmission.SendAll", "Completed : %s", err.Error())
+		t.instruments.Log(octo.LOGERROR, t.info.UUID, "httpbasic.BasicTransmission.SendAll", "Completed : %s", err.Error())
 		return err
 	}
 
-	t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.SendAll", "Completed")
+	t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.SendAll", "Completed")
 	return nil
 }
 
 // Send pipes the giving data down the provided pipeline.
 func (t *BasicTransmission) Send(data []byte, flush bool) error {
-	t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Send", "Started")
+	t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Send", "Started")
 	t.buffer.Write(data)
 
 	if !flush {
-		t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Send", "Completed")
+		t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Send", "Completed")
 		return nil
 	}
 
 	if _, err := t.Writer.Write(t.buffer.Bytes()); err != nil {
-		t.log.Log(octo.LOGERROR, t.info.UUID, "httpbasic.BasicTransmission.Send", "Completed : %s", err.Error())
+		t.instruments.Log(octo.LOGERROR, t.info.UUID, "httpbasic.BasicTransmission.Send", "Completed : %s", err.Error())
 		return err
 	}
 
-	t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Send", "Completed")
+	t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Send", "Completed")
 	return nil
 }
 
@@ -354,7 +354,7 @@ func (t *BasicTransmission) Ctx() context.Context {
 
 // Close ends the internal conneciton.
 func (t *BasicTransmission) Close() error {
-	t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Close", "Started")
-	t.log.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Close", "Completed")
+	t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Close", "Started")
+	t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Close", "Completed")
 	return nil
 }

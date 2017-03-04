@@ -43,7 +43,7 @@ type ServerAttr struct {
 
 // Server defines a struct for a managing the internals of a UDP server.
 type Server struct {
-	log                 octo.Logs
+	instruments         octo.Instrumentation
 	Attr                ServerAttr
 	conn                *net.UDPConn
 	ip                  *net.UDPAddr
@@ -62,10 +62,10 @@ type Server struct {
 }
 
 // New returns a new instance of the UDP server.
-func New(log octo.Logs, attr ServerAttr) *Server {
+func New(instrument octo.Instrumentation, attr ServerAttr) *Server {
 	var s Server
-	s.log = log
 	s.Attr = attr
+	s.instruments = instrument
 	s.clientAuthenticated = make(map[string]bool)
 
 	ip, port, _ := net.SplitHostPort(attr.Addr)
@@ -117,7 +117,7 @@ func (s *Server) stopRunning() bool {
 
 // Close returns the error from closing the listener.
 func (s *Server) Close() error {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Close", "Started : %#v", s.info)
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Close", "Started : %#v", s.info)
 
 	if !s.IsRunning() {
 		return nil
@@ -134,21 +134,21 @@ func (s *Server) Close() error {
 	s.rg.Wait()
 
 	if err := s.conn.Close(); err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.Close", "Completed : %s", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.Close", "Completed : %s", err.Error())
 	}
 
 	s.wg.Wait()
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Close", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Close", "Completed")
 	return nil
 }
 
 // Listen fires up the server and internal operations of the udp server.
 func (s *Server) Listen(system octo.System) error {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Listen", "Started : %#v", s.Attr)
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Listen", "Started : %#v", s.Attr)
 
 	if s.IsRunning() {
-		s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Listen", "Completed")
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Listen", "Completed")
 		return nil
 	}
 
@@ -165,7 +165,7 @@ func (s *Server) Listen(system octo.System) error {
 
 	udpAddr, err := net.ResolveUDPAddr(version, s.Attr.Addr)
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.Listen", "Completed : Error : %s", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.Listen", "Completed : Error : %s", err.Error())
 		return err
 	}
 
@@ -180,13 +180,13 @@ func (s *Server) Listen(system octo.System) error {
 	}
 
 	if err != nil {
-		s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.Listen", "Completed : Error : %s", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.Listen", "Completed : Error : %s", err.Error())
 		return err
 	}
 
 	s.conn = conn
 	s.system = system
-	s.base = octo.NewBaseSystem(system, jsonparser.JSON, s.log, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(s, system))
+	s.base = octo.NewBaseSystem(system, jsonparser.JSON, s.instruments, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(s, system))
 
 	// Set the server state as active.
 	s.rl.Lock()
@@ -200,14 +200,14 @@ func (s *Server) Listen(system octo.System) error {
 
 	go s.handleConnections(system)
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Listen", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Listen", "Completed")
 	return nil
 }
 
 // retrieveOrAdd checks if there exists a client with the giving address else
 // returns a new Client object for the giving address.
 func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
-	s.log.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Started")
+	s.instruments.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Started")
 
 	s.cl.Lock()
 	defer s.cl.Unlock()
@@ -226,13 +226,13 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 		for _, client := range s.clients {
 			// TODO: Do we want to match by network: `client.addr.Network() == network` ?
 			if client.addr.String() == addrString {
-				s.log.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Found Existing Client : %q : %q", network, addr.String())
+				s.instruments.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Found Existing Client : %q : %q", network, addr.String())
 				return copyClient(&client)
 			}
 		}
 	}
 
-	s.log.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Creating New Client : %q : %q", network, addr.String())
+	s.instruments.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Creating New Client : %q : %q", network, addr.String())
 
 	cuuid := uuid.NewV4().String()
 	info := octo.Info{
@@ -243,18 +243,18 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 	}
 
 	cl := Client{
-		log:    s.log,
-		info:   info,
-		addr:   addr,
-		conn:   s.conn,
-		server: s,
-		ctx:    context.New(),
-		index:  index,
+		server:      s,
+		info:        info,
+		addr:        addr,
+		index:       index,
+		conn:        s.conn,
+		ctx:         context.New(),
+		instruments: s.instruments,
 	}
 
 	s.clients = append(s.clients, cl)
 
-	s.log.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Completed")
+	s.instruments.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Completed")
 	return &cl
 }
 
@@ -272,19 +272,19 @@ func copyClient(c *Client) *Client {
 
 // getClients returns all registered clients of the giving server.
 func (s *Server) getClients() []Client {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.getClients", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.getClients", "Started")
 
 	s.cl.Lock()
 	defer s.cl.Unlock()
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.getClients", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.getClients", "Completed")
 	return s.clients[0:]
 }
 
 // handleConnections handles the process of accepting/reading requests from the server
 // and passing it to desired clients.
 func (s *Server) handleConnections(system octo.System) {
-	s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Started : %#v", s.Attr)
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Started : %#v", s.Attr)
 
 	defer s.wg.Done()
 
@@ -292,16 +292,16 @@ func (s *Server) handleConnections(system octo.System) {
 
 	for s.IsRunning() {
 		if s.stopRunning() {
-			s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "Closing")
+			s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "Closing")
 			break
 		}
 
 		n, addr, err := s.conn.ReadFromUDP(block)
-		s.log.Log(octo.LOGTRANSMITTED, s.info.UUID, "udp.Server.handleConnections", "Received : %+q : %+q", block[:n], addr.String())
-		s.log.Log(octo.LOGTRANSMITTED, s.info.UUID, "udp.Server.handleConnections", "Completed")
+		s.instruments.Log(octo.LOGTRANSMITTED, s.info.UUID, "udp.Server.handleConnections", "Received : %+q : %+q", block[:n], addr.String())
+		s.instruments.Log(octo.LOGTRANSMITTED, s.info.UUID, "udp.Server.handleConnections", "Completed")
 
 		if err != nil {
-			s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "Read Error : %+s", err)
+			s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "Read Error : %+s", err)
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
 			}
@@ -315,14 +315,14 @@ func (s *Server) handleConnections(system octo.System) {
 		// routine.
 		s.rg.Add(1)
 
-		s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Initiaiting Client Connection : %+q", addr)
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Initiaiting Client Connection : %+q", addr)
 
 		(func(data []byte, tx *Client) {
-			s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Client Init : %+q", tx.info)
+			s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Client Init : %+q", tx.info)
 			defer s.rg.Done()
 
 			if err := tx.authenticate(data); err != nil {
-				s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Client Auth : Authentication Failed : Error : %+s", err)
+				s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Client Auth : Authentication Failed : Error : %+s", err)
 				go tx.Close()
 				return
 			}
@@ -338,10 +338,10 @@ func (s *Server) handleConnections(system octo.System) {
 
 			rem, err := s.base.ServeBase(data, tx)
 			if err != nil {
-				s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+				s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
 
 				if err := s.system.Serve(data, tx); err != nil {
-					s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+					s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
 					return
 				}
 			}
@@ -349,7 +349,7 @@ func (s *Server) handleConnections(system octo.System) {
 			// Handle remaining messages and pass it to user system.
 			if rem != nil {
 				if err := s.system.Serve(byteutils.JoinMessages(rem...), tx); err != nil {
-					s.log.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
+					s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
 					return
 				}
 			}
@@ -365,29 +365,29 @@ func (s *Server) handleConnections(system octo.System) {
 		}
 	}
 
-	s.log.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Completed")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Completed")
 }
 
 //================================================================================
 
 // Client defines the structure which communicates with other udp connections.
 type Client struct {
-	log    octo.Logs
-	conn   *net.UDPConn
-	addr   *net.UDPAddr
-	server *Server
-	ctx    context.Context
-	info   octo.Info
-	index  int
+	instruments octo.Instrumentation
+	conn        *net.UDPConn
+	addr        *net.UDPAddr
+	server      *Server
+	ctx         context.Context
+	info        octo.Info
+	index       int
 }
 
 // authenticate runs the authentication procedure to authenticate that the connection
 // was valid.
 func (c *Client) authenticate(data []byte) error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Started")
 
 	if !c.server.Attr.Authenticate {
-		c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 		return nil
 	}
 
@@ -400,14 +400,14 @@ func (c *Client) authenticate(data []byte) error {
 	c.server.cwl.Unlock()
 
 	if authenticated {
-		c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 		return nil
 	}
 
 	var cmd octo.Command
 
 	if err := json.Unmarshal(data, &cmd); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : Unmarshalling failed : %q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : Unmarshalling failed : %q", err.Error())
 
 		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(err.Error())); cerr == nil {
 			c.Send(block, true)
@@ -417,7 +417,7 @@ func (c *Client) authenticate(data []byte) error {
 	}
 
 	if !bytes.Equal(cmd.Name, consts.AuthResponse) {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : Not Authorization Response : %q", consts.ErrAuthorizationFailed.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : Not Authorization Response : %q", consts.ErrAuthorizationFailed.Error())
 
 		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(consts.ErrAuthorizationFailed.Error())); cerr == nil {
 			c.Send(block, true)
@@ -426,13 +426,13 @@ func (c *Client) authenticate(data []byte) error {
 		return consts.ErrAuthorizationFailed
 	}
 
-	c.log.Log(octo.LOGDEBUG, c.info.UUID, "udp.Client.authenticate", "Auth Command : %+q", cmd.String())
+	c.instruments.Log(octo.LOGDEBUG, c.info.UUID, "udp.Client.authenticate", "Auth Command : %+q", cmd.String())
 
 	auth, err := utils.AuthCredentialFromJSON(bytes.Join(cmd.Data, []byte("")))
-	c.log.Log(octo.LOGDEBUG, c.info.UUID, "udp.Client.authenticate", "AuthCredentials : %+q", auth)
+	c.instruments.Log(octo.LOGDEBUG, c.info.UUID, "udp.Client.authenticate", "AuthCredentials : %+q", auth)
 
 	if err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : AuthCredential Unmarshal : %q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : AuthCredential Unmarshal : %q", err.Error())
 
 		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(err.Error())); cerr == nil {
 			c.Send(block, true)
@@ -442,7 +442,7 @@ func (c *Client) authenticate(data []byte) error {
 	}
 
 	if err := c.server.system.Authenticate(auth); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : AuthCredential Authorization : %+q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : AuthCredential Authorization : %+q", err.Error())
 
 		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(err.Error())); cerr == nil {
 			c.Send(block, true)
@@ -461,33 +461,33 @@ func (c *Client) authenticate(data []byte) error {
 	}
 	c.server.cwl.Unlock()
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 	return nil
 }
 
 // Send delivers the message to the giving addr associated with the client.
 func (c *Client) Send(data []byte, flush bool) error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Send", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Send", "Started")
 
-	c.log.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Started : %+q", data)
+	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Started : %+q", data)
 	_, err := c.conn.WriteToUDP(data, c.addr)
-	c.log.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Ended")
+	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Ended")
 
 	if err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.Send", "Completed : %s", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.Send", "Completed : %s", err.Error())
 		return err
 	}
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Send", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Send", "Completed")
 	return nil
 }
 
 // SendAll delivers the message to the giving addr associated with the client.
 func (c *Client) SendAll(data []byte, flush bool) error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.SendAll", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.SendAll", "Started")
 
 	if err := c.Send(data, flush); err != nil {
-		c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.SendAll", "Completed : %s", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.SendAll", "Completed : %s", err.Error())
 		return err
 	}
 
@@ -499,24 +499,24 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 		}
 
 		if _, err := c.conn.WriteToUDP(data, client.addr); err != nil {
-			c.log.Log(octo.LOGERROR, c.info.UUID, "udp.Client.SendAll", "Completed : Client{UUID: %s, Addr: %+s} : %s", client.info.UUID, client.addr.String(), err.Error())
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.SendAll", "Completed : Client{UUID: %s, Addr: %+s} : %s", client.info.UUID, client.addr.String(), err.Error())
 		}
 	}
 
-	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.SendAll", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.SendAll", "Completed")
 	return nil
 }
 
 // Close usually closes the connection patterning to the giving client, but in
 // udp the server connection handles the response, so operation happens here.
 func (c *Client) Close() error {
-	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Close", "Started : %+q", c.info)
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Close", "Started : %+q", c.info)
 	c.server.cl.Lock()
 	{
 		c.server.clients = append(c.server.clients[:c.index], c.server.clients[c.index+1:]...)
 	}
 	c.server.cl.Unlock()
-	c.log.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Close", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Close", "Completed")
 	return nil
 }
 

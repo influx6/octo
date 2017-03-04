@@ -10,16 +10,16 @@ import (
 	"github.com/influx6/octo/netutils"
 )
 
-// TCPConnClient defines a interface for a type which connects to
+// TCPConn defines a interface for a type which connects to
 // a tcp endpoint and provides read and write capabilities.
-type TCPConnClient struct {
+type TCPConn struct {
 	net.Conn
 	writer *bufio.Writer
 	reader *bufio.Reader
 }
 
-// NewTCPConnClient returns a new instance of a TCPConnClient.
-func NewTCPConnClient(addr string) (*TCPConnClient, error) {
+// New returns a new instance of a TCPConn.
+func New(addr string) (*TCPConn, error) {
 	ip, port, _ := net.SplitHostPort(addr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -32,7 +32,7 @@ func NewTCPConnClient(addr string) (*TCPConnClient, error) {
 		return nil, err
 	}
 
-	return &TCPConnClient{
+	return &TCPConn{
 		Conn:   conn,
 		writer: bufio.NewWriter(conn),
 		reader: bufio.NewReader(conn),
@@ -40,7 +40,7 @@ func NewTCPConnClient(addr string) (*TCPConnClient, error) {
 }
 
 // Write writes the current available data from the pipeline.
-func (t *TCPConnClient) Write(data []byte, flush bool) error {
+func (t *TCPConn) Write(data []byte, flush bool) error {
 	if t.Conn == nil {
 		return ErrClosedConnection
 	}
@@ -66,7 +66,7 @@ func (t *TCPConnClient) Write(data []byte, flush bool) error {
 
 // Close ends and disposes of the internal connection, closing it and
 // all reads and writers.
-func (t *TCPConnClient) Close() error {
+func (t *TCPConn) Close() error {
 	if t.Conn == nil {
 		return nil
 	}
@@ -83,7 +83,7 @@ func (t *TCPConnClient) Close() error {
 var ErrClosedConnection = errors.New("Connection Closed")
 
 // Read reads the current available data from the pipeline.
-func (t *TCPConnClient) Read() ([]byte, error) {
+func (t *TCPConn) Read() ([]byte, error) {
 	if t.Conn == nil {
 		return nil, ErrClosedConnection
 	}

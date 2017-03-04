@@ -26,6 +26,7 @@ const (
 	ConnectDeadline          = 4 * time.Second
 	MaxWaitTime              = 3 * time.Second
 	MaxWaitReadTime          = 5 * time.Second
+	OverMaxWaitReadTime      = 30 * time.Second
 	MaxWaitWriteTime         = 5 * time.Second
 	MinDataSize              = 512
 	MaxConnections           = (64 * 1024)

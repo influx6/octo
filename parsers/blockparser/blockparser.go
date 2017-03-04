@@ -3,6 +3,7 @@ package blockparser
 import (
 	"bytes"
 	"errors"
+	"regexp"
 
 	"github.com/influx6/octo"
 )
@@ -23,6 +24,7 @@ var (
 	endColonBracket   = []byte("}:")
 	beginColonBracket = []byte(":{")
 	endTrace          = []byte("End Trace")
+	clipMatch         = regexp.MustCompile("[^A-Za-z0-9]+")
 )
 
 // Blocks defines a package level parser using the blockParser specification.
@@ -73,6 +75,10 @@ func (b blockParser) Parse(msg []byte) ([]octo.Command, error) {
 		var data [][]byte
 
 		command = blockParts[0]
+
+		if clipMatch.Match(command) {
+			return nil, errors.New("Invalid Command format")
+		}
 
 		if len(blockParts) > 1 {
 			data = blockParts[1:len(blockParts)]
