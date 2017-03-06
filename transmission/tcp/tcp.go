@@ -23,7 +23,8 @@ import (
 	"github.com/influx6/octo/netutils"
 	"github.com/influx6/octo/parsers/blockparser"
 	"github.com/influx6/octo/parsers/byteutils"
-	"github.com/influx6/octo/systems/blocksystem"
+	"github.com/influx6/octo/transmission"
+	"github.com/influx6/octo/transmission/systems/blocksystem"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -39,7 +40,7 @@ const tlsTimeout = float64(500&time.Millisecond) / float64(time.Second)
 const authTimeout = float64(2*tlsTimeout) / float64(time.Second)
 const maxDataWrite = 6048
 
-// Transmission defines a structure which implements the the octo.Transmission
+// Transmission defines a structure which implements the the transmission.Stream
 // interface.
 type Transmission struct {
 	client *Client
@@ -74,7 +75,7 @@ func (t *Transmission) Close() error {
 
 //================================================================================
 
-// Client defines the tcp struct which implements the octo.Transmission
+// Client defines the tcp struct which implements the transmission.Stream
 // interface for communication between a server.
 type Client struct {
 	clusterClient         bool
@@ -83,8 +84,8 @@ type Client struct {
 	instruments           octo.Instrumentation
 	info                  octo.Info
 	cinfo                 octo.Info
-	system                octo.System
-	primarySystem         *octo.BaseSystem
+	system                transmission.System
+	primarySystem         *transmission.BaseSystem
 	server                *Server
 	sendg                 sync.WaitGroup
 	wg                    sync.WaitGroup
@@ -345,7 +346,7 @@ func (c *Client) acceptRequests() {
 
 // handleRequest processes data requests coming in from the client's internal
 // connection.
-func (c *Client) handleRequest(data []byte, tx octo.Transmission) error {
+func (c *Client) handleRequest(data []byte, tx transmission.Stream) error {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Started")
 
 	if c.primarySystem == nil {
@@ -893,9 +894,9 @@ type Server struct {
 	clusterInfo      octo.Info
 	listener         net.Listener
 	clusterListener  net.Listener
-	clientSystem     octo.System
-	clusterSystem    *octo.BaseSystem
-	clientBaseSystem *octo.BaseSystem
+	clientSystem     transmission.System
+	clusterSystem    *transmission.BaseSystem
+	clientBaseSystem *transmission.BaseSystem
 	wg               sync.WaitGroup
 	cg               sync.WaitGroup
 	clientLock       sync.Mutex
@@ -1028,7 +1029,7 @@ func (s *Server) Close() error {
 
 // Listen sets up the listener and begins listening for connection requests from
 // the listener.
-func (s *Server) Listen(system octo.System) error {
+func (s *Server) Listen(system transmission.System) error {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Listen", "Started")
 
 	if s.IsRunning() {
@@ -1059,8 +1060,8 @@ func (s *Server) Listen(system octo.System) error {
 	s.rl.Unlock()
 
 	s.clientSystem = system
-	s.clientBaseSystem = octo.NewBaseSystem(system, blockparser.Blocks, s.instruments, blocksystem.BaseHandlers())
-	s.clusterSystem = octo.NewBaseSystem(system, blockparser.Blocks, s.instruments, blocksystem.BaseHandlers(), blocksystem.AuthHandlers(s), blocksystem.ClusterHandlers(s, s, s.TransmitToClients))
+	s.clientBaseSystem = transmission.NewBaseSystem(system, blockparser.Blocks, s.instruments, blocksystem.BaseHandlers())
+	s.clusterSystem = transmission.NewBaseSystem(system, blockparser.Blocks, s.instruments, blocksystem.BaseHandlers(), blocksystem.AuthHandlers(s), blocksystem.ClusterHandlers(s, s, s.TransmitToClients))
 
 	if s.clusterListener != nil {
 		s.wg.Add(2)
@@ -1310,7 +1311,7 @@ func (s *Server) HandleClusters(infos []octo.Info) {
 }
 
 // handleClientConnections handles the connection from client providers.
-func (s *Server) handleClientConnections(system octo.System) {
+func (s *Server) handleClientConnections(system transmission.System) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.handleClientConnections", "Started")
 	defer s.wg.Done()
 
@@ -1417,7 +1418,7 @@ func (s *Server) handleClientConnections(system octo.System) {
 
 // handles the connection of cluster servers and intializes the needed operations
 // and procedures in getting clusters servers initialized.
-func (s *Server) handleClusterConnections(system octo.System) {
+func (s *Server) handleClusterConnections(system transmission.System) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.handleClusterConnections", "Started")
 	defer s.wg.Done()
 

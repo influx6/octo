@@ -3,6 +3,7 @@ package tcpclient
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/url"
@@ -11,8 +12,10 @@ import (
 
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/clients/goclient"
+	"github.com/influx6/octo/clients/goclient/systems/blocksystem"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
+	"github.com/influx6/octo/parsers/blockparser"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -23,6 +26,8 @@ type Attr struct {
 	MaxDrops     int
 	Addr         string
 	Clusters     []string
+	Authenticate bool
+	TLSConfig    *tls.Config
 }
 
 // TCPPod defines a TCP implementation which connects
@@ -35,6 +40,8 @@ type TCPPod struct {
 	bm          bytes.Buffer
 	wg          sync.WaitGroup
 	system      goclient.System
+	encoding    goclient.MessageEncoding
+	base        *goclient.BaseSystem
 	cnl         sync.Mutex
 	doClose     bool
 	conn        *TCPConn
@@ -60,8 +67,16 @@ func New(insts octo.Instrumentation, attr Attr) (*TCPPod, error) {
 }
 
 // Listen calls the connection to be create and begins serving requests.
-func (w *TCPPod) Listen(sm goclient.System) error {
+func (w *TCPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) error {
 	w.system = sm
+	w.encoding = encoding
+
+	w.base = goclient.NewBaseSystem(
+		blockparser.Blocks,
+		w.instruments,
+		blocksystem.BaseHandlers(),
+		blocksystem.AuthHandlers(sm),
+	)
 
 	if err := w.reconnect(); err != nil {
 		return err
@@ -143,40 +158,28 @@ func (w *TCPPod) Register(tm goclient.StateHandlerType, hmi interface{}) {
 }
 
 // Send delivers the giving message to the underline TCP connection.
-func (w *TCPPod) Send(data []byte, flush bool) error {
+func (w *TCPPod) Send(data interface{}, flush bool) error {
+
+	// Encode outside of lock to reduce contention.
+	dataBytes, err := w.encoding.Encode(data)
+	if err != nil {
+		return err
+	}
+
 	w.cnl.Lock()
 	if w.curAddr != nil && !w.curAddr.connected && !w.curAddr.reconnecting {
 		w.cnl.Unlock()
-		w.bm.Write(data)
+		w.bm.Write(dataBytes)
 		return nil
 	}
 	w.cnl.Unlock()
 
-	return w.conn.Write(data, flush)
-}
-
-// acceptRequests processing the connections for incoming messages.
-func (w *TCPPod) acceptRequests() {
-	w.wg.Add(1)
-	defer w.wg.Done()
-
-	for !w.shouldClose() {
-		w.conn.SetReadDeadline(time.Now().Add(consts.WSReadTimeout))
-
-		data, err := w.conn.Read()
-		if err != nil {
-			w.notify(goclient.ErrorHandler, err)
-
-			if err == consts.ErrAbitraryCloseConnection || err == consts.ErrClosedConnection || err == consts.ErrUnstableRead {
-				go w.reconnect()
-				return
-			}
-
-			continue
-		}
-
-		w.system.Serve(data, w)
+	if w.bm.Len() > 0 {
+		w.conn.Write(w.bm.Bytes(), false)
+		w.bm.Reset()
 	}
+
+	return w.conn.Write(dataBytes, flush)
 }
 
 // srvAddr defines a struct for storing addr details.
@@ -188,6 +191,7 @@ type srvAddr struct {
 	addr         string
 	connected    bool
 	reconnecting bool
+	lastAttempt  time.Time
 	contact      goclient.Contact
 }
 
@@ -285,31 +289,108 @@ func (w *TCPPod) reconnect() error {
 	}
 
 	var addr string
+	addr = w.curAddr.ep.String()
 
 	w.cnl.Lock()
-	w.curAddr.reconnecting = true
-	w.curAddr.connected = false
-	addr = w.curAddr.ep.String()
+	{
+		w.curAddr.reconnecting = true
+		w.curAddr.connected = false
+		w.curAddr.recons++
+		w.curAddr.lastAttempt = time.Now()
+	}
 	w.cnl.Unlock()
 
-	conn, err := NewTCPConn(addr)
+	var newConf *tls.Config
+
+	if w.attr.TLSConfig != nil {
+		newConf = w.attr.TLSConfig.Clone()
+	}
+
+	conn, err := NewTCPConn(addr, newConf)
 	if err != nil {
 		w.notify(goclient.DisconnectHandler, err)
+
+		w.cnl.Lock()
+		{
+			w.curAddr.connected = false
+			w.curAddr.reconnecting = false
+			w.curAddr.drops++
+		}
+		w.cnl.Unlock()
+
 		return w.reconnect()
 	}
 
 	w.cnl.Lock()
-	w.conn = conn
-	w.curAddr.connected = true
-	w.curAddr.reconnecting = false
+	{
+		w.conn = conn
+		w.curAddr.connected = true
+		w.curAddr.reconnecting = false
+	}
 	w.cnl.Unlock()
 
 	w.notify(goclient.ConnectHandler, nil)
 
-	w.wg.Add(1)
+	if err := w.initConnectionSetup(); err != nil {
+		w.notify(goclient.ErrorHandler, err)
+		return err
+	}
+
 	go w.acceptRequests()
 
 	return nil
+}
+
+// initConnectionSetup defines a function to initiate the connection
+// procedure generated for using tcp with octo.TCPServers.
+func (w *TCPPod) initConnectionSetup() error {
+	if !w.shouldClose() {
+		return nil
+	}
+
+	// If we are expected to authenticate then we need to deliver \
+	// authentication details.
+	if !w.attr.Authenticate {
+		return nil
+	}
+
+	data, err := w.conn.Read()
+	if err != nil {
+		return err
+	}
+
+	_ = data
+	return nil
+}
+
+// acceptRequests processing the connections for incoming messages.
+func (w *TCPPod) acceptRequests() {
+	w.wg.Add(1)
+	defer w.wg.Done()
+
+	for !w.shouldClose() {
+		w.conn.SetReadDeadline(time.Now().Add(consts.WSReadTimeout))
+
+		data, err := w.conn.Read()
+		if err != nil {
+			w.notify(goclient.ErrorHandler, err)
+
+			if err == consts.ErrAbitraryCloseConnection || err == consts.ErrClosedConnection || err == consts.ErrUnstableRead {
+				go w.reconnect()
+				return
+			}
+
+			continue
+		}
+
+		val, err := w.encoding.Decode(data)
+		if err != nil {
+			w.notify(goclient.ErrorHandler, err)
+			continue
+		}
+
+		w.system.Serve(val, w)
+	}
 }
 
 // shouldClose returns true/false if the giving connection should close.
@@ -391,7 +472,7 @@ type TCPConn struct {
 }
 
 // NewTCPConn returns a new instance of a TCPConn.
-func NewTCPConn(addr string) (*TCPConn, error) {
+func NewTCPConn(addr string, tlsConf *tls.Config) (*TCPConn, error) {
 	ip, port, _ := net.SplitHostPort(addr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -404,12 +485,38 @@ func NewTCPConn(addr string) (*TCPConn, error) {
 		return nil, err
 	}
 
+	newConn, err := upgradeTLS(conn, tlsConf)
+	if err != nil {
+		return nil, err
+	}
+
 	return &TCPConn{
-		conn:          conn,
-		writer:        bufio.NewWriter(conn),
-		reader:        bufio.NewReader(conn),
+		conn:          newConn,
+		writer:        bufio.NewWriter(newConn),
+		reader:        bufio.NewReader(newConn),
 		lastBlockSize: 512,
 	}, nil
+}
+
+// upgradeTLS upgrades the giving tcp connection to use a tls based connection
+// encrypted by the giving tls.Config.
+func upgradeTLS(conn net.Conn, cm *tls.Config) (net.Conn, error) {
+	if cm == nil {
+		return conn, nil
+	}
+
+	if cm.ServerName == "" {
+		h, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+		cm.ServerName = h
+	}
+
+	tlsConn := tls.Client(conn, cm)
+
+	if err := tlsConn.Handshake(); err != nil {
+		return conn, err
+	}
+
+	return tlsConn, nil
 }
 
 // SetDeadline sets the base deadline of the connection.

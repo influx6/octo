@@ -17,6 +17,7 @@ import (
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/tests"
+	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/websocket"
 	"github.com/influx6/octo/utils"
 )
@@ -55,7 +56,7 @@ func (mockSystem) Authenticate(cred octo.AuthCredential) error {
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (mockSystem) Serve(message []byte, tx octo.Transmission) error {
+func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 	var command octo.Command
 
 	if err := json.Unmarshal(message, &command); err != nil {

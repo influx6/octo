@@ -17,7 +17,8 @@ import (
 	"github.com/influx6/octo/netutils"
 	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/parsers/jsonparser"
-	"github.com/influx6/octo/systems/jsonsystem"
+	"github.com/influx6/octo/transmission"
+	"github.com/influx6/octo/transmission/systems/jsonsystem"
 	"github.com/influx6/octo/utils"
 	uuid "github.com/satori/go.uuid"
 )
@@ -77,7 +78,7 @@ func (s *BasicServer) Credential() octo.AuthCredential {
 }
 
 // Listen begins the initialization of the websocket server.
-func (s *BasicServer) Listen(system octo.System) error {
+func (s *BasicServer) Listen(system transmission.System) error {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.Listen", "Started")
 
 	if s.isRunning() {
@@ -173,20 +174,20 @@ func (s *BasicServer) isRunning() bool {
 //================================================================================
 
 // BasicServeHTTP provides a structure which implements the http.Handler and provides
-// the core server which implements the needed functionality to use the octo.System
+// the core server which implements the needed functionality to use the transmission.System
 // interface. It is provided as a seperate module to allow flexibility with user
 // created server and routes for http requests.
 type BasicServeHTTP struct {
-	primary      *octo.BaseSystem
-	system       octo.System
+	primary      *transmission.BaseSystem
+	system       transmission.System
 	instruments  octo.Instrumentation
 	info         octo.Info
 	authenticate bool
 }
 
 // NewBasicServeHTTP returns a new instance of the BasicServeHTTP object.
-func NewBasicServeHTTP(authenticate bool, inst octo.Instrumentation, info octo.Info, cred octo.Credentials, system octo.System) *BasicServeHTTP {
-	primary := octo.NewBaseSystem(system, jsonparser.JSON, inst, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(cred, system))
+func NewBasicServeHTTP(authenticate bool, inst octo.Instrumentation, info octo.Info, cred octo.Credentials, system transmission.System) *BasicServeHTTP {
+	primary := transmission.NewBaseSystem(system, jsonparser.JSON, inst, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(cred, system))
 
 	return &BasicServeHTTP{
 		authenticate: authenticate,
@@ -274,7 +275,7 @@ type BasicTransmission struct {
 	Writer      http.ResponseWriter
 	ctx         context.Context
 	server      *BasicServeHTTP
-	system      octo.System
+	system      transmission.System
 	info        octo.Info
 	instruments octo.Instrumentation
 	buffer      bytes.Buffer

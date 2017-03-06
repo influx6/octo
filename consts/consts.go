@@ -79,6 +79,10 @@ var (
 
 	ErrNoServerFound = errors.New("Available server not found")
 
+	// ErrRequestUnsearvable defines the error returned when a request can not
+	// be handled.
+	ErrRequestUnsearvable = errors.New("Request Unserveable")
+
 	// ErrAuthorizationFailed  is the error returned when the giving credentials
 	// fail to authenticate.
 	ErrAuthorizationFailed = errors.New("Invalid Credentials: Authorization Failed")

@@ -6,9 +6,10 @@ import (
 
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
+	"github.com/influx6/octo/transmission"
 )
 
-func sendJSON(tx octo.Transmission, val interface{}, flush bool) error {
+func sendJSON(tx transmission.Stream, val interface{}, flush bool) error {
 	var data []byte
 	var err error
 
@@ -27,9 +28,9 @@ func sendJSON(tx octo.Transmission, val interface{}, flush bool) error {
 
 // AuthHandlers provides a MessageHandlers providing auth operations/events
 // handling.
-func AuthHandlers(credential octo.Credentials, authenticator octo.Authenticator) octo.MessageHandlerMap {
-	return octo.MessageHandlerMap{
-		string(consts.AuthResponse): func(m octo.Command, tx octo.Transmission) error {
+func AuthHandlers(credential octo.Credentials, authenticator octo.Authenticator) transmission.HandlerMap {
+	return transmission.HandlerMap{
+		string(consts.AuthResponse): func(m octo.Command, tx transmission.Stream) error {
 			var userCredentials octo.AuthCredential
 
 			if err := json.Unmarshal(bytes.Join(m.Data, []byte("")), &userCredentials); err != nil {
@@ -38,7 +39,7 @@ func AuthHandlers(credential octo.Credentials, authenticator octo.Authenticator)
 
 			return authenticator.Authenticate(userCredentials)
 		},
-		string(consts.AuthRequest): func(m octo.Command, tx octo.Transmission) error {
+		string(consts.AuthRequest): func(m octo.Command, tx transmission.Stream) error {
 			parsed, err := json.Marshal(credential.Credential())
 			if err != nil {
 				return err
@@ -51,23 +52,23 @@ func AuthHandlers(credential octo.Credentials, authenticator octo.Authenticator)
 
 // BaseHandlers provides a set of MessageHandlers providing common operations/events
 // that can be requested during the operations of a giving request.
-func BaseHandlers() octo.MessageHandlerMap {
-	return octo.MessageHandlerMap{
-		"OK": func(m octo.Command, tx octo.Transmission) error {
+func BaseHandlers() transmission.HandlerMap {
+	return transmission.HandlerMap{
+		"OK": func(m octo.Command, tx transmission.Stream) error {
 			return nil
 		},
-		"CLOSE": func(m octo.Command, tx octo.Transmission) error {
+		"CLOSE": func(m octo.Command, tx transmission.Stream) error {
 			defer tx.Close()
 
 			return sendJSON(tx, octo.Command{Name: consts.OK}, true)
 		},
-		"PONG": func(m octo.Command, tx octo.Transmission) error {
+		"PONG": func(m octo.Command, tx transmission.Stream) error {
 			return sendJSON(tx, octo.Command{Name: consts.PING}, true)
 		},
-		"PING": func(m octo.Command, tx octo.Transmission) error {
+		"PING": func(m octo.Command, tx transmission.Stream) error {
 			return sendJSON(tx, octo.Command{Name: consts.PONG}, true)
 		},
-		string(consts.ClientInfoRequest): func(m octo.Command, tx octo.Transmission) error {
+		string(consts.ClientInfoRequest): func(m octo.Command, tx transmission.Stream) error {
 			clientInfo, _ := tx.Info()
 
 			infx, err := json.Marshal(clientInfo)
@@ -77,7 +78,7 @@ func BaseHandlers() octo.MessageHandlerMap {
 
 			return sendJSON(tx, octo.Command{Name: consts.ClientInfoResponse, Data: [][]byte{infx}}, true)
 		},
-		string(consts.InfoRequest): func(m octo.Command, tx octo.Transmission) error {
+		string(consts.InfoRequest): func(m octo.Command, tx transmission.Stream) error {
 			_, serverInfo := tx.Info()
 
 			infx, err := json.Marshal(serverInfo)

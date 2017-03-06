@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/go/tcpclient"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
 	"github.com/influx6/octo/utils"
@@ -29,6 +28,7 @@ type WeaveAttr struct {
 	Transformer   TCPTransformer
 	Auth          octo.Authenticator
 	TLSConfig     *tls.Config
+	TCPTLSConfig  *tls.Config
 	Notifications chan []byte
 }
 
@@ -101,7 +101,7 @@ func (s *WeaveServer) Listen() error {
 
 	s.server = server
 	s.listener = tlListener
-	s.mux = NewWeaveServerMux(s.instruments, s.Attr.Auth, s.Attr.Transformer, s.info, s.Attr.TargetAddr)
+	s.mux = NewWeaveServerMux(s.instruments, s.Attr.Auth, s.Attr.Transformer, s.info, s.Attr.TargetAddr, s.Attr.TCPTLSConfig)
 
 	s.rl.Lock()
 	{
@@ -209,12 +209,13 @@ type WeaveServerMux struct {
 	auth               octo.Authenticator
 	instruments        octo.Instrumentation
 	transformer        TCPTransformer // if not supplied will send data as is.
+	config             *tls.Config
 }
 
 // NewWeaveServerMux returns a new instance of a WeaveServerMux which will use the
 // provided targetAddr if provided as destination else use that from the incoming
 // data from the request.
-func NewWeaveServerMux(instruments octo.Instrumentation, auth octo.Authenticator, transfomer TCPTransformer, info octo.Info, targetAddr string) *WeaveServerMux {
+func NewWeaveServerMux(instruments octo.Instrumentation, auth octo.Authenticator, transfomer TCPTransformer, info octo.Info, targetAddr string, config *tls.Config) *WeaveServerMux {
 	ip, port, _ := net.SplitHostPort(targetAddr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -223,6 +224,7 @@ func NewWeaveServerMux(instruments octo.Instrumentation, auth octo.Authenticator
 	}
 
 	return &WeaveServerMux{
+		config:             config,
 		auth:               auth,
 		info:               info,
 		instruments:        instruments,
@@ -329,7 +331,7 @@ func (s *WeaveServerMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Create a new TCPClient with the appropriate address and then write the new
 	// TCPRequest and read until response and wire to response.
-	client, err := tcpclient.New(targetAddr)
+	client, err := NewTCPClient(targetAddr, s.config)
 	if err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpweave.WeaveServer.ServeHTTP", "Completed : Error : Failed to create new tcpclient : %+q", err)
 		http.Error(w, "Failed to create tcp client connection: "+err.Error(), http.StatusInternalServerError)

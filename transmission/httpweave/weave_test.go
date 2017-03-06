@@ -14,6 +14,7 @@ import (
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/tests"
+	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/httpweave"
 	"github.com/influx6/octo/transmission/tcp"
 	"github.com/influx6/octo/utils"
@@ -85,7 +86,7 @@ func (mockSystem) Authenticate(cred octo.AuthCredential) error {
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (mockSystem) Serve(message []byte, tx octo.Transmission) error {
+func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 	var treq httpweave.TCPRequest
 
 	if err := json.Unmarshal(message, &treq); err != nil {
@@ -165,13 +166,14 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 	}
 }
 
-func newWeaveHTTP(t *testing.T, inst octo.Instrumentation, authenticate octo.Authenticator, cred octo.Credentials, system octo.System) *httpweave.WeaveServerMux {
+func newWeaveHTTP(t *testing.T, inst octo.Instrumentation, authenticate octo.Authenticator, cred octo.Credentials, system transmission.System) *httpweave.WeaveServerMux {
 	return httpweave.NewWeaveServerMux(
 		inst,
 		authenticate,
 		simpleTCPTransformer{},
 		utils.NewInfo(":5060"),
 		":7060",
+		nil,
 	)
 }
 

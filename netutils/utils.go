@@ -32,6 +32,29 @@ func GetAddr(addr string) string {
 
 //==============================================================================
 
+// UpgradeConnToTLS upgrades the giving tcp connection to use a tls based connection
+// encrypted by the giving tls.Config.
+func UpgradeConnToTLS(conn net.Conn, cm *tls.Config) (net.Conn, error) {
+	if cm == nil {
+		return conn, nil
+	}
+
+	if cm.ServerName == "" {
+		h, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+		cm.ServerName = h
+	}
+
+	tlsConn := tls.Client(conn, cm)
+
+	if err := tlsConn.Handshake(); err != nil {
+		return conn, err
+	}
+
+	return tlsConn, nil
+}
+
+//================================================================================
+
 //LoadTLS loads a tls.Config from a key and cert file path
 func LoadTLS(cert string, key string, ca string) (*tls.Config, error) {
 	var config *tls.Config

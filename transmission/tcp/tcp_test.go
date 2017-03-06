@@ -11,6 +11,7 @@ import (
 	"github.com/influx6/octo/parsers/blockparser"
 	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/tests"
+	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/tcp"
 )
 
@@ -48,7 +49,7 @@ func (mockSystem) Authenticate(cred octo.AuthCredential) error {
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (mockSystem) Serve(message []byte, tx octo.Transmission) error {
+func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 	cmds, err := blockparser.Blocks.Parse(message)
 	if err != nil {
 		return err
@@ -87,7 +88,7 @@ func TestServer(t *testing.T) {
 
 	server.Listen(system)
 
-	client, err := mock.NewTCPClient(":6050")
+	client, err := mock.NewTCPClient(":6050", nil)
 	if err != nil {
 		tests.Failed(t, "Should have successfully connected to host server ':4050': %s.", err)
 	}
@@ -242,13 +243,13 @@ func TestClusterServerSendAll(t *testing.T) {
 	defer server2.Close()
 	defer server.Close()
 
-	client, err := mock.NewTCPClient(":6050")
+	client, err := mock.NewTCPClient(":6050", nil)
 	if err != nil {
 		tests.Failed(t, "Should have successfully connected to host server ':4050': %s.", err)
 	}
 	tests.Passed(t, "Should have successfully connected to host server ':4050'.")
 
-	client2, err := mock.NewTCPClient(":7050")
+	client2, err := mock.NewTCPClient(":7050", nil)
 	if err != nil {
 		tests.Failed(t, "Should have successfully connected to host server ':4050': %s.", err)
 	}

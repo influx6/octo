@@ -15,7 +15,8 @@ import (
 	"github.com/influx6/octo/netutils"
 	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/parsers/jsonparser"
-	"github.com/influx6/octo/systems/jsonsystem"
+	"github.com/influx6/octo/transmission"
+	"github.com/influx6/octo/transmission/systems/jsonsystem"
 	"github.com/influx6/octo/utils"
 	uuid "github.com/satori/go.uuid"
 )
@@ -50,8 +51,8 @@ type Server struct {
 	info                octo.Info
 	wg                  sync.WaitGroup
 	rg                  sync.WaitGroup
-	base                *octo.BaseSystem
-	system              octo.System
+	base                *transmission.BaseSystem
+	system              transmission.System
 	rl                  sync.Mutex
 	running             bool
 	doClose             bool
@@ -144,7 +145,7 @@ func (s *Server) Close() error {
 }
 
 // Listen fires up the server and internal operations of the udp server.
-func (s *Server) Listen(system octo.System) error {
+func (s *Server) Listen(system transmission.System) error {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.Listen", "Started : %#v", s.Attr)
 
 	if s.IsRunning() {
@@ -186,7 +187,7 @@ func (s *Server) Listen(system octo.System) error {
 
 	s.conn = conn
 	s.system = system
-	s.base = octo.NewBaseSystem(system, jsonparser.JSON, s.instruments, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(s, system))
+	s.base = transmission.NewBaseSystem(system, jsonparser.JSON, s.instruments, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(s, system))
 
 	// Set the server state as active.
 	s.rl.Lock()
@@ -283,7 +284,7 @@ func (s *Server) getClients() []Client {
 
 // handleConnections handles the process of accepting/reading requests from the server
 // and passing it to desired clients.
-func (s *Server) handleConnections(system octo.System) {
+func (s *Server) handleConnections(system transmission.System) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Started : %#v", s.Attr)
 
 	defer s.wg.Done()

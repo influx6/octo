@@ -8,6 +8,7 @@ import (
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/parsers/byteutils"
+	"github.com/influx6/octo/transmission"
 )
 
 // Clusters defines an interface which returns a slice of Info of it's internal
@@ -24,12 +25,12 @@ type ClusterHandler interface {
 
 // ClusterHandlers returns a map of handlers suited for cluster requests and
 // response cycles.
-func ClusterHandlers(master Clusters, handler ClusterHandler, sendMessage func([]byte) error) octo.MessageHandlerMap {
-	return octo.MessageHandlerMap{
-		string(consts.ClusterPostOK): func(m octo.Command, tx octo.Transmission) error {
+func ClusterHandlers(master Clusters, handler ClusterHandler, sendMessage func([]byte) error) transmission.HandlerMap {
+	return transmission.HandlerMap{
+		string(consts.ClusterPostOK): func(m octo.Command, tx transmission.Stream) error {
 			return tx.Send(byteutils.MakeByteMessage(consts.ClusterRequest, nil), true)
 		},
-		string(consts.ClusterDistRequest): func(m octo.Command, tx octo.Transmission) error {
+		string(consts.ClusterDistRequest): func(m octo.Command, tx transmission.Stream) error {
 			dataLen := len(m.Data)
 			if dataLen > 1 || dataLen == 0 {
 				return errors.New("Cluster distribution expects at most a single element in the data list of a Message")
@@ -45,7 +46,7 @@ func ClusterHandlers(master Clusters, handler ClusterHandler, sendMessage func([
 
 			return sendMessage(realData)
 		},
-		string(consts.ClusterRequest): func(m octo.Command, tx octo.Transmission) error {
+		string(consts.ClusterRequest): func(m octo.Command, tx transmission.Stream) error {
 			var clusterData [][]byte
 
 			for _, cluster := range master.Clusters() {
@@ -59,7 +60,7 @@ func ClusterHandlers(master Clusters, handler ClusterHandler, sendMessage func([
 
 			return tx.Send(byteutils.MakeByteMessage(consts.ClusterResponse, clusterData...), true)
 		},
-		string(consts.ClusterResponse): func(m octo.Command, tx octo.Transmission) error {
+		string(consts.ClusterResponse): func(m octo.Command, tx transmission.Stream) error {
 			var clusters []octo.Info
 			_, serverInfo := tx.Info()
 
@@ -84,11 +85,11 @@ func ClusterHandlers(master Clusters, handler ClusterHandler, sendMessage func([
 	}
 }
 
-// AuthHandlers provides a MessageHandlers providing auth operations/events
+// AuthHandlers provides a Handlers providing auth operations/events
 // handling.
-func AuthHandlers(credential octo.Credentials) octo.MessageHandlerMap {
-	return octo.MessageHandlerMap{
-		string(consts.AuthRequest): func(m octo.Command, tx octo.Transmission) error {
+func AuthHandlers(credential octo.Credentials) transmission.HandlerMap {
+	return transmission.HandlerMap{
+		string(consts.AuthRequest): func(m octo.Command, tx transmission.Stream) error {
 			parsed, err := json.Marshal(credential.Credential())
 			if err != nil {
 				return err
@@ -99,25 +100,25 @@ func AuthHandlers(credential octo.Credentials) octo.MessageHandlerMap {
 	}
 }
 
-// BaseHandlers provides a set of MessageHandlers providing common operations/events
+// BaseHandlers provides a set of Handlers providing common operations/events
 // that can be requested during the operations of a giving request.
-func BaseHandlers() octo.MessageHandlerMap {
-	return octo.MessageHandlerMap{
-		"OK": func(m octo.Command, tx octo.Transmission) error {
+func BaseHandlers() transmission.HandlerMap {
+	return transmission.HandlerMap{
+		"OK": func(m octo.Command, tx transmission.Stream) error {
 			return nil
 		},
-		"CLOSE": func(m octo.Command, tx octo.Transmission) error {
+		"CLOSE": func(m octo.Command, tx transmission.Stream) error {
 			defer tx.Close()
 
 			return tx.Send(byteutils.WrapResponseBlock([]byte("OK"), nil), true)
 		},
-		"PONG": func(m octo.Command, tx octo.Transmission) error {
+		"PONG": func(m octo.Command, tx transmission.Stream) error {
 			return tx.Send(byteutils.WrapResponseBlock([]byte("PING"), nil), true)
 		},
-		"PING": func(m octo.Command, tx octo.Transmission) error {
+		"PING": func(m octo.Command, tx transmission.Stream) error {
 			return tx.Send(byteutils.WrapResponseBlock([]byte("PONG"), nil), true)
 		},
-		string(consts.ClientInfoRequest): func(m octo.Command, tx octo.Transmission) error {
+		string(consts.ClientInfoRequest): func(m octo.Command, tx transmission.Stream) error {
 			clientInfo, _ := tx.Info()
 
 			infx, err := json.Marshal(clientInfo)
@@ -127,7 +128,7 @@ func BaseHandlers() octo.MessageHandlerMap {
 
 			return tx.Send(byteutils.WrapResponseBlock(consts.ClientInfoResponse, infx), true)
 		},
-		string(consts.InfoRequest): func(m octo.Command, tx octo.Transmission) error {
+		string(consts.InfoRequest): func(m octo.Command, tx transmission.Stream) error {
 			_, serverInfo := tx.Info()
 
 			infx, err := json.Marshal(serverInfo)

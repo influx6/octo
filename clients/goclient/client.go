@@ -1,5 +1,7 @@
 package goclient
 
+import "github.com/influx6/octo"
+
 // StateHandlerType defines a int type to specific a handler type for registry.
 type StateHandlerType int
 
@@ -25,23 +27,31 @@ type StateHandler func(Contact)
 // during connections.
 type ErrorStateHandler func(Contact, error)
 
-// Pod defines an interface that provides a means of delivery giving messages
+// MessageEncoding defines an interface which exposes the ability to encode and
+// decode data recieved from server.
+type MessageEncoding interface {
+	Encode(interface{}) ([]byte, error)
+	Decode([]byte) (interface{}, error)
+}
+
+// Stream defines an interface that provides a means of delivery giving messages
 // to another encapsulated endpoint.
-type Pod interface {
+type Stream interface {
 	Close() error
-	Send([]byte, bool) error
+	Send(interface{}, bool) error
 }
 
 // Connection defines a interface which provides a means by which connections
 // are made and processed.
 type Connection interface {
-	Pod
-	Listen(System) error
+	Stream
+	Listen(System, MessageEncoding) error
 	Register(StateHandlerType, interface{})
 }
 
 // System defines a interface which exposes a method to handle/process a giving
 // byte slice and recieves the core pipe for response.
 type System interface {
-	Serve([]byte, Pod)
+	octo.Credentials
+	Serve(interface{}, Stream)
 }

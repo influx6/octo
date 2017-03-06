@@ -21,7 +21,8 @@ import (
 	"github.com/influx6/octo/netutils"
 	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/parsers/jsonparser"
-	"github.com/influx6/octo/systems/jsonsystem"
+	"github.com/influx6/octo/transmission"
+	"github.com/influx6/octo/transmission/systems/jsonsystem"
 	"github.com/influx6/octo/utils"
 	uuid "github.com/satori/go.uuid"
 )
@@ -81,7 +82,7 @@ func New(attr SocketAttr, instruments octo.Instrumentation) *SocketServer {
 }
 
 // Listen begins the initialization of the websocket server.
-func (s *SocketServer) Listen(system octo.System) error {
+func (s *SocketServer) Listen(system transmission.System) error {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Started")
 
 	if s.isRunning() {
@@ -199,22 +200,22 @@ type BaseSocketServer struct {
 	Attr               BaseSocketAttr
 	instruments        octo.Instrumentation
 	info               octo.Info
-	system             octo.System
-	base               *octo.BaseSystem
+	system             transmission.System
+	base               *transmission.BaseSystem
 	cl                 sync.Mutex
 	clients            []*Client
 	upgrader           websocket.Upgrader
 }
 
 // NewBaseSocketServer returns a new instance of a BaseSocketServer.
-func NewBaseSocketServer(attr BaseSocketAttr, instruments octo.Instrumentation, info octo.Info, credentials octo.Credentials, system octo.System) *BaseSocketServer {
+func NewBaseSocketServer(attr BaseSocketAttr, instruments octo.Instrumentation, info octo.Info, credentials octo.Credentials, system transmission.System) *BaseSocketServer {
 	var base BaseSocketServer
 	base.instruments = instruments
 	base.Attr = attr
 	base.info = info
 	base.system = system
 
-	base.base = octo.NewBaseSystem(
+	base.base = transmission.NewBaseSystem(
 		system,
 		jsonparser.JSON,
 		instruments,
@@ -328,8 +329,8 @@ type Client struct {
 	Request     *http.Request
 	instruments octo.Instrumentation
 	info        octo.Info
-	system      octo.System
-	primary     *octo.BaseSystem
+	system      transmission.System
+	primary     *transmission.BaseSystem
 	wg          sync.WaitGroup
 	sg          sync.WaitGroup
 	server      *BaseSocketServer
@@ -599,7 +600,7 @@ func (c *Client) isRunning() bool {
 
 //================================================================================
 
-// Transmission defines a struct for handling responses from a octo.System object.
+// Transmission defines a struct for handling responses from a transmission.System object.
 type Transmission struct {
 	client *Client
 	ctx    context.Context
