@@ -46,6 +46,16 @@ type TransmissionProtocol interface {
 
 //================================================================================
 
+// Transmission defines an interface which exposes methods to transmit data over
+// a giving transmit.
+type Transmission interface {
+	Close() error
+	Info() (Info, Info)
+	Ctx() context.Context
+	Send(data []byte, flush bool) error
+	SendAll(data []byte, flush bool) error
+}
+
 // TransmissionServer defines a type which exposes a method to service a provided
 // data.
 type TransmissionServer interface {
@@ -121,18 +131,6 @@ type AuthCredential struct {
 // for the giving entity.
 type Credentials interface {
 	Credential() AuthCredential
-}
-
-//================================================================================
-
-// Transmission defines an interface which exposes methods to transmit data over
-// a giving transmit.
-type Transmission interface {
-	Close() error
-	Info() (Info, Info)
-	Ctx() context.Context
-	Send(data []byte, flush bool) error
-	SendAll(data []byte, flush bool) error
 }
 
 //================================================================================
