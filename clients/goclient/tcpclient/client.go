@@ -23,13 +23,13 @@ type Attr struct {
 	MaxDrops     int
 	Addr         string
 	Clusters     []string
-	SocketAttr   TCPAttr
 }
 
 // TCPPod defines a TCP implementation which connects
 // to a provided TCP endpoint for making requests.
 type TCPPod struct {
 	attr        Attr
+	instruments octo.Instrumentation
 	servers     []*srvAddr
 	curAddr     *srvAddr
 	bm          bytes.Buffer
@@ -46,9 +46,10 @@ type TCPPod struct {
 }
 
 // New returns a new instance of the TCP pod.
-func New(logs octo.Logs, attr Attr) (*TCPPod, error) {
+func New(insts octo.Instrumentation, attr Attr) (*TCPPod, error) {
 	var pod TCPPod
 	pod.attr = attr
+	pod.instruments = insts
 
 	// Prepare all server registering and validate paths.
 	if err := pod.prepareServers(); err != nil {
@@ -291,7 +292,7 @@ func (w *TCPPod) reconnect() error {
 	addr = w.curAddr.ep.String()
 	w.cnl.Unlock()
 
-	conn, err := NewTCPConn(addr, w.attr.SocketAttr)
+	conn, err := NewTCPConn(addr)
 	if err != nil {
 		w.notify(goclient.DisconnectHandler, err)
 		return w.reconnect()
