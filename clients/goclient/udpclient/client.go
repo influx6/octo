@@ -62,6 +62,14 @@ type UDPPod struct {
 
 // New returns a new instance of the websocket pod.
 func New(insts octo.Instrumentation, attr Attr) (*UDPPod, error) {
+	if attr.MaxDrops <= 0 {
+		attr.MaxDrops = consts.MaxTotalConnectionFailure
+	}
+
+	if attr.MaxReconnets <= 0 {
+		attr.MaxReconnets = consts.MaxTotalReconnection
+	}
+
 	var pod UDPPod
 	pod.attr = attr
 	pod.instruments = insts
@@ -77,14 +85,6 @@ func New(insts octo.Instrumentation, attr Attr) (*UDPPod, error) {
 		pod.udpVersion = "udp6"
 	default:
 		return nil, errors.New("Version number not supported for udp. Only Ver0, Ver4, Ver6 allowed")
-	}
-
-	if attr.MaxDrops <= 0 {
-		attr.MaxDrops = consts.MaxTotalConnectionFailure
-	}
-
-	if attr.MaxDrops <= 0 {
-		attr.MaxReconnets = consts.MaxTotalReconnection
 	}
 
 	// Prepare all server registering and validate paths.

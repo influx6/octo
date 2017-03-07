@@ -13,6 +13,58 @@ import (
 	"github.com/influx6/octo/transmission/tcp"
 )
 
+func TestClientConnectionWithBadServers(t *testing.T) {
+	clientSystem := mock.NewClientSystem(octo.AuthCredential{
+		Scheme: "XBot",
+		Key:    "api-32",
+		Token:  "auth-4531",
+		Data:   []byte("BOMTx"),
+	})
+
+	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()})
+
+	client, err := tcpclient.New(inst, tcpclient.Attr{
+		Addr: ":7040",
+	})
+
+	if err != nil {
+		tests.Failed("Should have successfully created clinet.")
+	}
+	tests.Passed("Should have successfully created clinet.")
+
+	err = client.Listen(clientSystem, mock.CommandEncoding{})
+	if err == nil {
+		tests.Failed("Should have successfully failed to connect to tcp server.")
+	}
+	tests.Passed("Should have successfully failed to connect to tcp server.")
+}
+
+func TestClientConnectionWithNoServers(t *testing.T) {
+	clientSystem := mock.NewClientSystem(octo.AuthCredential{
+		Scheme: "XBot",
+		Key:    "api-32",
+		Token:  "auth-4531",
+		Data:   []byte("BOMTx"),
+	})
+
+	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()})
+
+	client, err := tcpclient.New(inst, tcpclient.Attr{
+		Addr: "",
+	})
+
+	if err == nil {
+		tests.Failed("Should have successfully failed to connect to tcp server.")
+	}
+	tests.Passed("Should have successfully failed to connect to tcp server.")
+
+	err = client.Listen(clientSystem, mock.CommandEncoding{})
+	if err == nil {
+		tests.Failed("Should have successfully failed to connect to tcp server.")
+	}
+	tests.Passed("Should have successfully failed to connect to tcp server.")
+}
+
 // TestClientConnectionWithoutAuth validates the behave of the tcp client for
 // connecting to tcp servers.
 func TestClientConnectionWithoutAuth(t *testing.T) {
@@ -40,6 +92,11 @@ func TestClientConnectionWithoutAuth(t *testing.T) {
 		tests.Failed("Should have successfully created conenction for tcp server: %+q.", err)
 	}
 	tests.Passed("Should have successfully created conenction for tcp server.")
+
+	if err := server.Listen(system); err == nil {
+		tests.Failed("Should have successfully  failed to recall listen for tcp server.")
+	}
+	tests.Passed("Should have successfully  failed to recall listen for tcp server.")
 
 	defer server.Close()
 

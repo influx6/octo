@@ -50,18 +50,18 @@ type WebSocketPod struct {
 
 // New returns a new instance of the websocket pod.
 func New(insts octo.Instrumentation, attr Attr) (*WebSocketPod, error) {
-	var pod WebSocketPod
-	pod.attr = attr
-	pod.instruments = insts
-	pod.pub = octo.NewPub()
-
 	if attr.MaxDrops <= 0 {
 		attr.MaxDrops = consts.MaxTotalConnectionFailure
 	}
 
-	if attr.MaxDrops <= 0 {
+	if attr.MaxReconnets <= 0 {
 		attr.MaxReconnets = consts.MaxTotalReconnection
 	}
+
+	var pod WebSocketPod
+	pod.attr = attr
+	pod.instruments = insts
+	pod.pub = octo.NewPub()
 
 	// Prepare all server registering and validate paths.
 	if err := pod.prepareServers(); err != nil {

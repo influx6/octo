@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"sync"
@@ -51,23 +52,21 @@ type TCPPod struct {
 
 // New returns a new instance of the TCP pod.
 func New(insts octo.Instrumentation, attr Attr) (*TCPPod, error) {
+	if attr.MaxDrops <= 0 {
+		attr.MaxDrops = consts.MaxTotalConnectionFailure
+	}
+
+	if attr.MaxReconnets <= 0 {
+		attr.MaxReconnets = consts.MaxTotalReconnection
+	}
+
 	var pod TCPPod
 	pod.pub = octo.NewPub()
 	pod.attr = attr
 	pod.instruments = insts
 
-	if attr.MaxDrops <= 0 {
-		attr.MaxDrops = consts.MaxTotalConnectionFailure
-	}
-
-	if attr.MaxDrops <= 0 {
-		attr.MaxReconnets = consts.MaxTotalReconnection
-	}
-
 	// Prepare all server registering and validate paths.
-	if err := pod.prepareServers(); err != nil {
-		return nil, err
-	}
+	pod.prepareServers()
 
 	return &pod, nil
 }
@@ -186,7 +185,7 @@ type srvAddr struct {
 
 // prepareServers registered all provided address from the attribute as cycling
 // items in a server lists for reducing load on a new server.
-func (w *TCPPod) prepareServers() error {
+func (w *TCPPod) prepareServers() {
 
 	// Add the main addr if provided.
 	if w.attr.Addr != "" {
@@ -216,7 +215,6 @@ func (w *TCPPod) prepareServers() error {
 		total++
 	}
 
-	return nil
 }
 
 // getNextServer gets the next server in the lists setting it as the main server
@@ -231,6 +229,9 @@ func (w *TCPPod) getNextServer() error {
 		if srv == nil {
 			continue
 		}
+
+		fmt.Printf("W: %q -> %d - %d\n", srv.addr, w.attr.MaxDrops, w.attr.MaxReconnets)
+		fmt.Printf("S: %q -> %d - %d\n", srv.addr, srv.drops, srv.recons)
 
 		// If the MaxTotalConnectionFailure is reached, nil this server has bad.
 		if w.attr.MaxDrops > 0 && srv.drops >= w.attr.MaxDrops {
