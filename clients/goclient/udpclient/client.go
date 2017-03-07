@@ -1,4 +1,4 @@
-package UDPConn
+package udpclient
 
 import (
 	"bufio"
@@ -13,7 +13,19 @@ import (
 	"github.com/influx6/octo/clients/goclient"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
+	"github.com/influx6/octo/parsers/jsonparser"
 	"github.com/influx6/octo/utils"
+)
+
+// Version determines the ip type used for generating the udp ip.
+type Version int
+
+// contains the set of ip versions for which is used to generate
+// ip value.
+const (
+	Ver0 Version = iota
+	Ver4
+	Ver6
 )
 
 // Attr defines a struct which holds configuration options for the UDP
@@ -21,16 +33,18 @@ import (
 type Attr struct {
 	MaxReconnets int
 	MaxDrops     int
-	Version      string
+	Version      Version
 	ClientAddr   string
 	Addr         string
 	Clusters     []string
+	Authenticate bool
 }
 
 // UDPPod defines a UDP implementation which connects
 // to a provided UDP endpoint for making requests.
 type UDPPod struct {
 	attr        Attr
+	udpVersion  string
 	localAddr   string
 	instruments octo.Instrumentation
 	pub         *octo.Pub
@@ -53,6 +67,17 @@ func New(insts octo.Instrumentation, attr Attr) (*UDPPod, error) {
 	pod.instruments = insts
 	pod.pub = octo.NewPub()
 	pod.localAddr = netutils.GetAddr(attr.ClientAddr)
+
+	switch attr.Version {
+	case Ver0:
+		pod.udpVersion = "udp"
+	case Ver4:
+		pod.udpVersion = "udp4"
+	case Ver6:
+		pod.udpVersion = "udp6"
+	default:
+		return nil, errors.New("Version number not supported for udp. Only Ver0, Ver4, Ver6 allowed")
+	}
 
 	if attr.MaxDrops <= 0 {
 		attr.MaxDrops = consts.MaxTotalConnectionFailure
@@ -106,6 +131,7 @@ func (w *UDPPod) Close() error {
 
 		w.cnl.Lock()
 		w.conn = nil
+		w.started = false
 		w.cnl.Unlock()
 		return err
 	}
@@ -114,6 +140,7 @@ func (w *UDPPod) Close() error {
 
 	w.cnl.Lock()
 	w.conn = nil
+	w.started = false
 	w.cnl.Unlock()
 
 	return nil
@@ -135,6 +162,37 @@ func (w *UDPPod) notify(n octo.StateHandlerType, err error) {
 	w.pub.Notify(n, cm, err)
 }
 
+// SendWithAddr delivers the giving message to the underline websocket connection.
+func (w *UDPPod) SendWithAddr(addr *net.UDPAddr, data interface{}, flush bool) error {
+	// Encode outside of lock to reduce contention.
+	dataBytes, err := w.encoding.Encode(data)
+	if err != nil {
+		return err
+	}
+
+	w.cnl.Lock()
+	if w.curAddr != nil && !w.curAddr.connected && !w.curAddr.reconnecting {
+		w.cnl.Unlock()
+		w.bm.Write(dataBytes)
+		return nil
+	}
+	w.cnl.Unlock()
+
+	if !flush {
+		w.bm.Write(dataBytes)
+		return nil
+	}
+
+	// fmt.Printf("Buffer: %+q\n", w.bm.Bytes())
+
+	if w.bm.Len() > 0 {
+		w.conn.Write(w.bm.Bytes(), false)
+		w.bm.Reset()
+	}
+
+	return w.conn.WriteUDP(dataBytes, addr)
+}
+
 // Send delivers the giving message to the underline websocket connection.
 func (w *UDPPod) Send(data interface{}, flush bool) error {
 
@@ -151,6 +209,11 @@ func (w *UDPPod) Send(data interface{}, flush bool) error {
 		return nil
 	}
 	w.cnl.Unlock()
+
+	if !flush {
+		w.bm.Write(dataBytes)
+		return nil
+	}
 
 	if w.bm.Len() > 0 {
 		w.conn.Write(w.bm.Bytes(), false)
@@ -180,11 +243,7 @@ func (w *UDPPod) prepareServers() error {
 	if w.attr.Addr != "" {
 		w.attr.Addr = netutils.GetAddr(w.attr.Addr)
 
-		ep, err := url.Parse(w.attr.Addr)
-		// fmt.Printf("Preping: %q -> %+q <- %q", w.attr.Addr, ep, err)
-		if err != nil {
-			return err
-		}
+		ep, _ := url.Parse(w.attr.Addr)
 
 		w.servers = append(w.servers, &srvAddr{
 			index:   0,
@@ -199,10 +258,7 @@ func (w *UDPPod) prepareServers() error {
 	for _, addr := range w.attr.Clusters {
 		addr = netutils.GetAddr(addr)
 
-		ep, err := url.Parse(addr)
-		if err != nil {
-			return err
-		}
+		ep, _ := url.Parse(addr)
 
 		w.servers = append(w.servers, &srvAddr{
 			index:   total,
@@ -264,15 +320,17 @@ func (w *UDPPod) getNextServer() error {
 // reconnect attempts to retrieve a new server after a failure to connect and then
 // begins message passing.
 func (w *UDPPod) reconnect() error {
-	if w.attr.Authenticate && w.attr.Headers != nil {
-		if _, ok := w.attr.Headers["Authorization"]; !ok {
-			return consts.ErrNoAuthorizationHeader
-		}
+
+	// Validate that if authentication is required, that atleast the
+	// scheme is not empty, since we can validate the other fields as
+	// they are not set and will change based on the scheme.
+	cred := w.system.Credential()
+	if w.attr.Authenticate && cred.Scheme == "" {
+		return consts.ErrNonEmptyCredentailFieldsRequired
 	}
 
 	w.cnl.Lock()
 	if w.started {
-		w.cnl.Unlock()
 		w.notify(octo.DisconnectHandler, nil)
 	}
 	w.cnl.Unlock()
@@ -297,7 +355,7 @@ func (w *UDPPod) reconnect() error {
 	}
 	w.cnl.Unlock()
 
-	conn, err := NewUDPConn(w.attr.Version, w.localAddr, addr)
+	conn, err := NewUDPConn(w.udpVersion, w.localAddr, addr)
 	if err != nil {
 		w.notify(octo.DisconnectHandler, err)
 		w.curAddr.drops++
@@ -313,7 +371,70 @@ func (w *UDPPod) reconnect() error {
 
 	w.notify(octo.ConnectHandler, nil)
 
+	if err := w.initConnectionSetup(); err != nil {
+		return err
+	}
+
 	go w.acceptRequests()
+
+	return nil
+}
+
+// initConnectionSetup defines a function to initiate the connection
+// procedure generated for using tcp with octo.TCPServers.
+func (w *UDPPod) initConnectionSetup() error {
+	if w.shouldClose() {
+		return nil
+	}
+
+	// If we are expected to authenticate then we need to deliver \
+	// authentication details.
+	if !w.attr.Authenticate {
+		return nil
+	}
+
+	// Attempt to negotiate authentication with server, we wont allow multiple
+	// messages but only handle one request and if it does not match then fail.
+	{
+		credentialData, err := utils.AuthCredentialToJSON(w.system.Credential())
+		if err != nil {
+			return err
+		}
+
+		// cmdData, _, err := utils.NewCommandByte(consts.AuthResponse, credentialData)
+		cmdData, _, err := utils.NewCommandByte(consts.AuthResponse, credentialData)
+		if err != nil {
+			return err
+		}
+
+		if err := w.conn.Write(cmdData, true); err != nil {
+			return err
+		}
+	}
+
+	// Await OK response, else deny connectivity. If we are permitted then,
+	// return as sucessfull.
+	{
+		data, _, err := w.conn.Read()
+		if err != nil {
+			return err
+		}
+
+		cmds, err := jsonparser.JSON.Parse(data)
+		if err != nil {
+			return err
+		}
+
+		if len(cmds) == 0 {
+			return consts.ErrParseError
+		}
+
+		cmd := cmds[0]
+
+		if !bytes.Equal(cmd.Name, consts.AuthroizationGranted) {
+			return consts.ErrAuthorizationFailed
+		}
+	}
 
 	return nil
 }
@@ -353,22 +474,16 @@ func (w *UDPPod) acceptRequests() {
 	}
 }
 
+// ulink defines a wrapper to provide a struct which implements the
+// goclient.Stream appropriate for use with requests.
 type ulink struct {
 	*UDPPod
 	targetAddr *net.UDPAddr
 }
 
 // Send delivers the giving message to the underline addr.
-func (l *ulink) Send(data []byte, flush bool) error {
-	l.UDPPod.cnl.Lock()
-	if l.UDPPod.curAddr != nil && !l.UDPPod.curAddr.connected && !l.UDPPod.curAddr.reconnecting {
-		l.UDPPod.cnl.Unlock()
-		l.UDPPod.bm.Write(data)
-		return nil
-	}
-	l.UDPPod.cnl.Unlock()
-
-	return l.UDPPod.conn.WriteUDP(data, l.targetAddr)
+func (w *ulink) Send(data interface{}, flush bool) error {
+	return w.SendWithAddr(w.targetAddr, data, flush)
 }
 
 // shouldClose returns true/false if the giving connection should close.

@@ -72,6 +72,7 @@ var (
 var (
 	ErrConnClosed         = errors.New("Connection Closed")
 	ErrUnsupported        = errors.New("Functionality is unsupported")
+	ErrUnsupportedFormat  = errors.New("Format/Type is unsupported")
 	ErrTimeoutOverReached = errors.New("Maximum timeout allowed reached")
 
 	ErrUnstableRead  = errors.New("Connection read was unstable")
@@ -86,6 +87,8 @@ var (
 	ErrInvalidAuthentication = errors.New("Server invalidated authentication credentials")
 
 	ErrInvalidRequestForState = errors.New("Recieved message fails to match expecte for current phase/state")
+
+	ErrNonEmptyCredentailFieldsRequired = errors.New("AuthCredential Fields are required as non empty")
 
 	// ErrRequestUnsearvable defines the error returned when a request can not
 	// be handled.

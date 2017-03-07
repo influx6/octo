@@ -21,6 +21,8 @@ func (CommandEncoding) Encode(dl interface{}) ([]byte, error) {
 	switch item := dl.(type) {
 	case octo.Command, *octo.Command:
 		cmdData, err = json.Marshal(item)
+	case []byte:
+		return item, nil
 	default:
 		return nil, consts.ErrUnsupported
 	}

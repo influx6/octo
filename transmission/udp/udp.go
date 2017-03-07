@@ -322,20 +322,25 @@ func (s *Server) handleConnections(system transmission.System) {
 			s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Client Init : %+q", tx.info)
 			defer s.rg.Done()
 
-			if err := tx.authenticate(data); err != nil {
-				s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Client Auth : Authentication Failed : Error : %+s", err)
-				go tx.Close()
+			// NOTE: We dont need to this here because the Client.authenticate method handles.
+			var authenticated bool
+
+			s.cwl.Lock()
+			{
+				authenticated = s.clientAuthenticated[addr.String()]
+			}
+			s.cwl.Unlock()
+
+			if !authenticated {
+				if err := tx.authenticate(data); err != nil {
+					s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Client Auth : Authentication Failed : Error : %+s", err)
+					go tx.Close()
+					return
+				}
+
+				// We just authenticated so we are not dealing with this anymore.
 				return
 			}
-
-			// NOTE: We dont need to this here because the Client.authenticate method handles.
-			// var authenticated bool
-			//
-			// s.cwl.Lock()
-			// {
-			// 	authenticated = s.clientAuthenticated[addr.String()]
-			// }
-			// c.cwl.Unlock()
 
 			rem, err := s.base.ServeBase(data, tx)
 			if err != nil {
@@ -373,13 +378,14 @@ func (s *Server) handleConnections(system transmission.System) {
 
 // Client defines the structure which communicates with other udp connections.
 type Client struct {
-	instruments octo.Instrumentation
-	conn        *net.UDPConn
-	addr        *net.UDPAddr
-	server      *Server
-	ctx         context.Context
-	info        octo.Contact
-	index       int
+	instruments   octo.Instrumentation
+	conn          *net.UDPConn
+	addr          *net.UDPAddr
+	server        *Server
+	ctx           context.Context
+	info          octo.Contact
+	authenticated bool
+	index         int
 }
 
 // authenticate runs the authentication procedure to authenticate that the connection
@@ -388,19 +394,6 @@ func (c *Client) authenticate(data []byte) error {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Started")
 
 	if !c.server.Attr.Authenticate {
-		c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
-		return nil
-	}
-
-	var authenticated bool
-
-	c.server.cwl.Lock()
-	{
-		authenticated = c.server.clientAuthenticated[c.addr.String()]
-	}
-	c.server.cwl.Unlock()
-
-	if authenticated {
 		c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 		return nil
 	}
@@ -443,7 +436,7 @@ func (c *Client) authenticate(data []byte) error {
 	}
 
 	if err := c.server.system.Authenticate(auth); err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : AuthCredential Authorization : %+q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : AuthCredential Authorization Failure : %+q", err.Error())
 
 		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(err.Error())); cerr == nil {
 			c.Send(block, true)
@@ -453,6 +446,7 @@ func (c *Client) authenticate(data []byte) error {
 	}
 
 	if block, _, cerr := utils.NewCommandByte(consts.AuthroizationGranted, consts.OK); cerr == nil {
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed : AuthCredential Authorization Granted : %q", c.info.Addr)
 		c.Send(block, true)
 	}
 
@@ -462,6 +456,7 @@ func (c *Client) authenticate(data []byte) error {
 	}
 	c.server.cwl.Unlock()
 
+	c.authenticated = true
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed")
 	return nil
 }
@@ -470,7 +465,7 @@ func (c *Client) authenticate(data []byte) error {
 func (c *Client) Send(data []byte, flush bool) error {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Send", "Started")
 
-	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Started : %+q", data)
+	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Started : %q", string(data))
 	_, err := c.conn.WriteToUDP(data, c.addr)
 	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Ended")
 

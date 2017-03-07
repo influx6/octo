@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/influx6/octo"
+	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/parsers/blockparser"
 	"github.com/influx6/octo/transmission"
 )
@@ -15,14 +16,14 @@ type ServerSystem struct {
 }
 
 // NewServerSystem returns a new system instance for accessing a octo.ServerSystem.
-func NewServerSystem(b octo.AuthCredential) ServerSystem {
-	return ServerSystem{
+func NewServerSystem(b octo.AuthCredential) *ServerSystem {
+	return &ServerSystem{
 		base: b,
 	}
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (ServerSystem) Serve(message []byte, tx transmission.Stream) error {
+func (s *ServerSystem) Serve(message []byte, tx transmission.Stream) error {
 	cmds, err := blockparser.Blocks.Parse(message)
 	if err != nil {
 		return err
@@ -30,6 +31,8 @@ func (ServerSystem) Serve(message []byte, tx transmission.Stream) error {
 
 	for _, command := range cmds {
 		switch {
+		case bytes.Equal(consts.ContactRequest, command.Name):
+			return tx.Send([]byte("OK"), true)
 		case bytes.Equal([]byte("PUMP"), command.Name):
 			return tx.Send([]byte("RUMP"), true)
 		case bytes.Equal([]byte("REX"), command.Name):
@@ -46,7 +49,7 @@ func (ServerSystem) Serve(message []byte, tx transmission.Stream) error {
 
 // Authenticate authenticates the provided credentials and implements
 // the octo.Authenticator interface.
-func (s ServerSystem) Authenticate(cred octo.AuthCredential) error {
+func (s *ServerSystem) Authenticate(cred octo.AuthCredential) error {
 	if cred.Scheme != s.base.Scheme {
 		return errors.New("Scheme does not match")
 	}

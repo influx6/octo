@@ -6,10 +6,12 @@ import (
 	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/clients/goclient/wsclient"
+	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/netutils"
 	"github.com/influx6/octo/transmission/websocket"
+	"github.com/influx6/octo/utils"
 )
 
 // TestClientConnectionWithAuth validates the behave of the tcp client for
@@ -68,6 +70,19 @@ func TestClientConnectionWithAuth(t *testing.T) {
 		tests.Failed("Should have successfully connected to websocket server with client: %+q.", err)
 	}
 	tests.Passed("Should have successfully connected to websocket server with client.")
+
+	cmdData, _, err := utils.NewCommandByte(consts.ContactRequest, nil)
+	if err != nil {
+		tests.Failed("Should have successfully created command request: %+q.", err)
+	}
+	tests.Passed("Should have successfully created command request.")
+
+	if err := client.Send(cmdData, true); err != nil {
+		tests.Failed("Should have successfully delivered command to server: %+q.", err)
+	}
+	tests.Passed("Should have successfully delivered command to server.")
+
+	clientSystem.Wait()
 }
 
 // TestClientConnectionWithoutAuth validates the behave of the tcp client for

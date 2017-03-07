@@ -546,6 +546,7 @@ func (c *Client) acceptRequests() {
 
 		messageType, message, err := c.Conn.ReadMessage()
 		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.acceptRequests", "Type: %d, Message: %+q", messageType, message)
+		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.acceptRequests", "Completed")
 
 		if err != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.acceptRequests", "Error : %q", err.Error())

@@ -6,8 +6,10 @@ import (
 	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/clients/goclient/tcpclient"
+	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
+	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/transmission/tcp"
 )
 
@@ -107,4 +109,11 @@ func TestClientConnectionWithAuth(t *testing.T) {
 	}
 	tests.Passed("Should have successfully connected to tcp server with client.")
 
+	cmdData := byteutils.MakeByteMessage(consts.ContactRequest, nil)
+	if err := client.Send(cmdData, true); err != nil {
+		tests.Failed("Should have successfully delivered command to server: %+q.", err)
+	}
+	tests.Passed("Should have successfully delivered command to server.")
+
+	clientSystem.Wait()
 }

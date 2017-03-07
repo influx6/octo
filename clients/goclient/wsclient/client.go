@@ -75,7 +75,6 @@ func New(insts octo.Instrumentation, attr Attr) (*WebSocketPod, error) {
 func (w *WebSocketPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) error {
 	w.cnl.Lock()
 	if w.started {
-		w.cnl.Unlock()
 		return nil
 	}
 	w.cnl.Unlock()
@@ -273,7 +272,6 @@ func (w *WebSocketPod) reconnect() error {
 
 	w.cnl.Lock()
 	if w.started {
-		w.cnl.Unlock()
 		w.notify(octo.DisconnectHandler, nil)
 	}
 	w.cnl.Unlock()

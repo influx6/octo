@@ -115,6 +115,7 @@ func (w *TCPPod) Close() error {
 
 		w.cnl.Lock()
 		w.conn = nil
+		w.started = false
 		w.cnl.Unlock()
 		return err
 	}
@@ -123,6 +124,7 @@ func (w *TCPPod) Close() error {
 
 	w.cnl.Lock()
 	w.conn = nil
+	w.started = false
 	w.cnl.Unlock()
 
 	return nil
@@ -265,7 +267,20 @@ func (w *TCPPod) getNextServer() error {
 // reconnect attempts to retrieve a new server after a failure to connect and then
 // begins message passing.
 func (w *TCPPod) reconnect() error {
-	w.notify(octo.DisconnectHandler, nil)
+
+	// Validate that if authentication is required, that atleast the
+	// scheme is not empty, since we can validate the other fields as
+	// they are not set and will change based on the scheme.
+	cred := w.system.Credential()
+	if w.attr.Authenticate && cred.Scheme == "" {
+		return consts.ErrNonEmptyCredentailFieldsRequired
+	}
+
+	w.cnl.Lock()
+	if w.started {
+		w.notify(octo.DisconnectHandler, nil)
+	}
+	w.cnl.Unlock()
 
 	if err := w.getNextServer(); err != nil {
 		return err
@@ -309,6 +324,7 @@ func (w *TCPPod) reconnect() error {
 		w.conn = conn
 		w.curAddr.connected = true
 		w.curAddr.reconnecting = false
+		w.started = true
 	}
 	w.cnl.Unlock()
 
