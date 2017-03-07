@@ -77,52 +77,52 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 
 	server := newBasicServeHTTP(t, true, pocket, mockSystem{})
 
-	t.Logf("\tWhen request %q command with correct authorization", consts.InfoRequest)
+	t.Logf("\tWhen request %q command with correct authorization", consts.ContactRequest)
 	{
 		header := make(map[string]string)
 		header["X-App"] = "Octo-App"
 		header["Authorization"] = "XBot api-32:auth-4531:BOMTx"
 
-		req, err := newMessageRequest(header, string(consts.InfoRequest))
+		req, err := newMessageRequest(header, string(consts.ContactRequest))
 		if err != nil {
-			tests.Failed(t, "Should have successfully created request for command %q", "info")
+			tests.Failed("Should have successfully created request for command %q", "info")
 		}
-		tests.Passed(t, "Should have successfully created request for command %q", "info")
+		tests.Passed("Should have successfully created request for command %q", "info")
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
 
 		var received octo.Command
 		if err := json.Unmarshal(recorder.Body.Bytes(), &received); err != nil {
-			tests.Failed(t, "Should have successfully parsed response for command %q: %q", "info", err.Error())
+			tests.Failed("Should have successfully parsed response for command %q: %q", "info", err.Error())
 		}
-		tests.Passed(t, "Should have successfully parsed response for command %q", "info")
+		tests.Passed("Should have successfully parsed response for command %q", "info")
 
-		if !bytes.Equal(received.Name, consts.InfoResponse) {
-			tests.Failed(t, "Should have successfully matched response command as %+q", consts.InfoResponse)
+		if !bytes.Equal(received.Name, consts.ContactResponse) {
+			tests.Failed("Should have successfully matched response command as %+q", consts.ContactResponse)
 		}
-		tests.Passed(t, "Should have successfully matched response command as %+q", consts.InfoResponse)
+		tests.Passed("Should have successfully matched response command as %+q", consts.ContactResponse)
 	}
 
-	t.Logf("\tWhen request %q command with bad authorization", consts.InfoRequest)
+	t.Logf("\tWhen request %q command with bad authorization", consts.ContactRequest)
 	{
 		header := make(map[string]string)
 		header["X-App"] = "Octo-App"
 		header["Authorization"] = "XBot api-35:auth-6531:BOMTx"
 
-		req, err := newMessageRequest(header, string(consts.InfoRequest))
+		req, err := newMessageRequest(header, string(consts.ContactRequest))
 		if err != nil {
-			tests.Failed(t, "Should have successfully created request for command %q", consts.InfoRequest)
+			tests.Failed("Should have successfully created request for command %q", consts.ContactRequest)
 		}
-		tests.Passed(t, "Should have successfully created request for command %q", consts.InfoRequest)
+		tests.Passed("Should have successfully created request for command %q", consts.ContactRequest)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
 
 		if recorder.Code != http.StatusInternalServerError {
-			tests.Failed(t, "Should have successfully failed to make request command %+q: %d", consts.InfoRequest, recorder.Code)
+			tests.Failed("Should have successfully failed to make request command %+q: %d", consts.ContactRequest, recorder.Code)
 		}
-		tests.Passed(t, "Should have successfully failed to make request command %+q", consts.InfoRequest)
+		tests.Passed("Should have successfully failed to make request command %+q", consts.ContactRequest)
 	}
 
 }
@@ -131,7 +131,7 @@ func newBasicServeHTTP(t *testing.T, authenticate bool, cred octo.Credentials, s
 	return httpbasic.NewBasicServeHTTP(
 		authenticate,
 		instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)}),
-		utils.NewInfo(":6070"),
+		utils.NewContact(":6070"),
 		cred,
 		system,
 	)

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/parsers/blockparser"
 	"github.com/influx6/octo/parsers/byteutils"
-	"github.com/influx6/octo/tests"
 	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/tcp"
 )
@@ -90,9 +90,9 @@ func TestServer(t *testing.T) {
 
 	client, err := mock.NewTCPClient(":6050", nil)
 	if err != nil {
-		tests.Failed(t, "Should have successfully connected to host server ':4050': %s.", err)
+		tests.Failed("Should have successfully connected to host server ':4050': %s.", err)
 	}
-	tests.Passed(t, "Should have successfully connected to host server ':4050'.")
+	tests.Passed("Should have successfully connected to host server ':4050'.")
 
 	defer server.Close()
 	defer client.Close()
@@ -100,15 +100,15 @@ func TestServer(t *testing.T) {
 	t.Logf("\tWhen 'PONG' is sent to the server")
 	{
 		if errx := client.Write(byteutils.WrapResponseBlock([]byte("PING"), nil), true); err != nil {
-			tests.Failed(t, "Should have delivered 'PING' message: %s.", errx)
+			tests.Failed("Should have delivered 'PING' message: %s.", errx)
 		}
-		tests.Passed(t, "Should have delivered 'PING' message.")
+		tests.Passed("Should have delivered 'PING' message.")
 
 		response, errm := client.Read()
 		if errm != nil {
-			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+			tests.Failed("Should have successfully received response from server: %s.", errm)
 		}
-		tests.Passed(t, "Should have successfully received response from server.")
+		tests.Passed("Should have successfully received response from server.")
 
 		validateResponseHeader(t, response, []byte("PONG"))
 	}
@@ -116,15 +116,15 @@ func TestServer(t *testing.T) {
 	t.Logf("\tWhen 'PING' is sent to the server")
 	{
 		if errx := client.Write(byteutils.WrapResponseBlock([]byte("PONG"), nil), true); err != nil {
-			tests.Failed(t, "Should have delivered 'PONG' message: %s.", errx)
+			tests.Failed("Should have delivered 'PONG' message: %s.", errx)
 		}
-		tests.Passed(t, "Should have delivered 'PONG' message.")
+		tests.Passed("Should have delivered 'PONG' message.")
 
 		response, errm := client.Read()
 		if errm != nil {
-			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+			tests.Failed("Should have successfully received response from server: %s.", errm)
 		}
-		tests.Passed(t, "Should have successfully received response from server.")
+		tests.Passed("Should have successfully received response from server.")
 
 		validateResponseHeader(t, response, []byte("PING"))
 	}
@@ -132,15 +132,15 @@ func TestServer(t *testing.T) {
 	t.Logf("\tWhen 'INFO' is sent to the server")
 	{
 		if errx := client.Write(byteutils.WrapResponseBlock([]byte("INFO"), nil), true); err != nil {
-			tests.Failed(t, "Should have delivered 'CLOSE' message: %s.", errx)
+			tests.Failed("Should have delivered 'CLOSE' message: %s.", errx)
 		}
-		tests.Passed(t, "Should have delivered 'CLOSE' message.")
+		tests.Passed("Should have delivered 'CLOSE' message.")
 
 		response, errm := client.Read()
 		if errm != nil {
-			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+			tests.Failed("Should have successfully received response from server: %s.", errm)
 		}
-		tests.Passed(t, "Should have successfully received response from server.")
+		tests.Passed("Should have successfully received response from server.")
 
 		validateResponseHeader(t, response, []byte("INFORES"))
 	}
@@ -148,15 +148,15 @@ func TestServer(t *testing.T) {
 	t.Logf("\tWhen 'CLOSED' is sent to the server")
 	{
 		if errx := client.Write(byteutils.WrapResponseBlock([]byte("CLOSE"), nil), true); err != nil {
-			tests.Failed(t, "Should have delivered 'CLOSE' message: %s.", errx)
+			tests.Failed("Should have delivered 'CLOSE' message: %s.", errx)
 		}
-		tests.Passed(t, "Should have delivered 'CLOSE' message.")
+		tests.Passed("Should have delivered 'CLOSE' message.")
 
 		response, errm := client.Read()
 		if errm != nil {
-			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+			tests.Failed("Should have successfully received response from server: %s.", errm)
 		}
-		tests.Passed(t, "Should have successfully received response from server.")
+		tests.Passed("Should have successfully received response from server.")
 
 		validateResponseHeader(t, response, []byte("OK"))
 	}
@@ -199,22 +199,22 @@ func TestClusterServers(t *testing.T) {
 	defer server.Close()
 
 	if err := server2.RelateWithCluster(":6060"); err != nil {
-		tests.Failed(t, "Should have successfully connected with cluster: %s.", err)
+		tests.Failed("Should have successfully connected with cluster: %s.", err)
 	}
-	tests.Passed(t, "Should have successfully connected with cluster.")
+	tests.Passed("Should have successfully connected with cluster.")
 
 	clusters := server2.Clusters()
 	if len(clusters) == 0 {
-		tests.Failed(t, "Should have successfully connected server2 with server1 cluster.")
+		tests.Failed("Should have successfully connected server2 with server1 cluster.")
 	}
-	tests.Passed(t, "Should have successfully connected server2 with server1 cluster.")
+	tests.Passed("Should have successfully connected server2 with server1 cluster.")
 
-	if clusters[0].UUID != server.CInfo().UUID {
+	if clusters[0].UUID != server.CLContact().UUID {
 		t.Logf("\t\t Received: %#v", clusters[0])
-		t.Logf("\t\t Expected: %#v", server.CInfo())
-		tests.Failed(t, "Should have successfully added server.UUID cluster to server2 cluster list.")
+		t.Logf("\t\t Expected: %#v", server.CLContact())
+		tests.Failed("Should have successfully added server.UUID cluster to server2 cluster list.")
 	}
-	tests.Passed(t, "Should have successfully added server.UUID cluster to server2 cluster list.")
+	tests.Passed("Should have successfully added server.UUID cluster to server2 cluster list.")
 }
 
 // TestClusterServerSendAll tests the validity of our server code.
@@ -236,24 +236,24 @@ func TestClusterServerSendAll(t *testing.T) {
 	server2.Listen(system)
 
 	if err := server2.RelateWithCluster(":6060"); err != nil {
-		tests.Failed(t, "Should have successfully connected with cluster: %s.", err)
+		tests.Failed("Should have successfully connected with cluster: %s.", err)
 	}
-	tests.Passed(t, "Should have successfully connected with cluster.")
+	tests.Passed("Should have successfully connected with cluster.")
 
 	defer server2.Close()
 	defer server.Close()
 
 	client, err := mock.NewTCPClient(":6050", nil)
 	if err != nil {
-		tests.Failed(t, "Should have successfully connected to host server ':4050': %s.", err)
+		tests.Failed("Should have successfully connected to host server ':4050': %s.", err)
 	}
-	tests.Passed(t, "Should have successfully connected to host server ':4050'.")
+	tests.Passed("Should have successfully connected to host server ':4050'.")
 
 	client2, err := mock.NewTCPClient(":7050", nil)
 	if err != nil {
-		tests.Failed(t, "Should have successfully connected to host server ':4050': %s.", err)
+		tests.Failed("Should have successfully connected to host server ':4050': %s.", err)
 	}
-	tests.Passed(t, "Should have successfully connected to host server ':4050'.")
+	tests.Passed("Should have successfully connected to host server ':4050'.")
 
 	defer client.Close()
 	defer client2.Close()
@@ -261,15 +261,15 @@ func TestClusterServerSendAll(t *testing.T) {
 	t.Logf("\tWhen 'BULL' is mass sent to the server")
 	{
 		if errx := client.Write(byteutils.WrapResponseBlock([]byte("BULL"), []byte("LOTTER")), true); err != nil {
-			tests.Failed(t, "Should have delivered 'PING' message: %s.", errx)
+			tests.Failed("Should have delivered 'PING' message: %s.", errx)
 		}
-		tests.Passed(t, "Should have delivered 'PING' message.")
+		tests.Passed("Should have delivered 'PING' message.")
 
 		response, errm := client2.Read()
 		if errm != nil {
-			tests.Failed(t, "Should have successfully received response from server: %s.", errm)
+			tests.Failed("Should have successfully received response from server: %s.", errm)
 		}
-		tests.Passed(t, "Should have successfully received response from server.")
+		tests.Passed("Should have successfully received response from server.")
 
 		validateResponseHeader(t, response, []byte("PRINT"))
 		validateResponse(t, response, []byte("LOTTER"))
@@ -279,35 +279,35 @@ func TestClusterServerSendAll(t *testing.T) {
 func validateResponseHeader(t *testing.T, data []byte, target []byte) {
 	receivedMessages, err := blockparser.Blocks.Parse(data)
 	if err != nil {
-		tests.Failed(t, "Should have successfully parsed response from server: %s.", err)
+		tests.Failed("Should have successfully parsed response from server: %s.", err)
 	}
-	tests.Passed(t, "Should have successfully parsed response from server.")
+	tests.Passed("Should have successfully parsed response from server.")
 
 	if len(receivedMessages) < 1 {
-		tests.Failed(t, "Should have successfully received atleast 1 response from server: %s.", err)
+		tests.Failed("Should have successfully received atleast 1 response from server: %s.", err)
 	}
-	tests.Passed(t, "Should have successfully received atleast 1 response from server.")
+	tests.Passed("Should have successfully received atleast 1 response from server.")
 
 	if !bytes.Equal(receivedMessages[0].Name, target) {
-		tests.Failed(t, "Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Name)
+		tests.Failed("Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Name)
 	}
-	tests.Passed(t, "Should have successfully matched response header as %+q.", target)
+	tests.Passed("Should have successfully matched response header as %+q.", target)
 }
 
 func validateResponse(t *testing.T, data []byte, target []byte) {
 	receivedMessages, err := blockparser.Blocks.Parse(data)
 	if err != nil {
-		tests.Failed(t, "Should have successfully parsed response from server: %s.", err)
+		tests.Failed("Should have successfully parsed response from server: %s.", err)
 	}
-	tests.Passed(t, "Should have successfully parsed response from server.")
+	tests.Passed("Should have successfully parsed response from server.")
 
 	if len(receivedMessages) < 1 {
-		tests.Failed(t, "Should have successfully received atleast 1 response from server: %s.", err)
+		tests.Failed("Should have successfully received atleast 1 response from server: %s.", err)
 	}
-	tests.Passed(t, "Should have successfully received atleast 1 response from server.")
+	tests.Passed("Should have successfully received atleast 1 response from server.")
 
 	if !bytes.Equal(bytes.Join(receivedMessages[0].Data, []byte("")), target) {
-		tests.Failed(t, "Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Name)
+		tests.Failed("Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Name)
 	}
-	tests.Passed(t, "Should have successfully matched response header as %+q.", target)
+	tests.Passed("Should have successfully matched response header as %+q.", target)
 }

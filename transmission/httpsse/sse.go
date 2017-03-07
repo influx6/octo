@@ -34,7 +34,7 @@ type SSEAttr struct {
 type SSEServer struct {
 	Attr        SSEAttr
 	instruments octo.Instrumentation
-	info        octo.Info
+	info        octo.Contact
 	server      *http.Server
 	listener    net.Listener
 	mux         *SSEServerMux
@@ -59,7 +59,7 @@ func New(instrument octo.Instrumentation, attr SSEAttr) *SSEServer {
 	var ws SSEServer
 	ws.closer = make(chan struct{})
 	ws.instruments = instrument
-	ws.info = octo.Info{
+	ws.info = octo.Contact{
 		SUUID:  suuid,
 		UUID:   suuid,
 		Addr:   attr.Addr,
@@ -175,7 +175,7 @@ func (s *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // SSEServerMux defines a struct which implements the http.Handler interface for
 // handling http server-sent requests.
 type SSEServerMux struct {
-	info          octo.Info
+	info          octo.Contact
 	notifications chan []byte
 	closer        chan struct{}
 	auth          octo.Authenticator
@@ -183,7 +183,7 @@ type SSEServerMux struct {
 }
 
 // NewSSEServerMux returns a new instance of a SSEServer.
-func NewSSEServerMux(instruments octo.Instrumentation, auth octo.Authenticator, info octo.Info, notifications chan []byte, closer chan struct{}) *SSEServerMux {
+func NewSSEServerMux(instruments octo.Instrumentation, auth octo.Authenticator, info octo.Contact, notifications chan []byte, closer chan struct{}) *SSEServerMux {
 	return &SSEServerMux{
 		auth:          auth,
 		notifications: notifications,

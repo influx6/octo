@@ -11,16 +11,16 @@ import (
 	"github.com/influx6/octo/transmission"
 )
 
-// Clusters defines an interface which returns a slice of Info of it's internal
+// Clusters defines an interface which returns a slice of Contact of it's internal
 // registered clusters.
 type Clusters interface {
-	Clusters() []octo.Info
+	Clusters() []octo.Contact
 }
 
 // ClusterHandler defines an interface that exposes a method to handle clusters
 // details.
 type ClusterHandler interface {
-	HandleClusters([]octo.Info)
+	HandleClusters([]octo.Contact)
 }
 
 // ClusterHandlers returns a map of handlers suited for cluster requests and
@@ -61,17 +61,17 @@ func ClusterHandlers(master Clusters, handler ClusterHandler, sendMessage func([
 			return tx.Send(byteutils.MakeByteMessage(consts.ClusterResponse, clusterData...), true)
 		},
 		string(consts.ClusterResponse): func(m octo.Command, tx transmission.Stream) error {
-			var clusters []octo.Info
-			_, serverInfo := tx.Info()
+			var clusters []octo.Contact
+			_, serverContact := tx.Contact()
 
 			for _, message := range m.Data {
-				var info octo.Info
+				var info octo.Contact
 				if err := json.Unmarshal(message, &info); err != nil {
 					return err
 				}
 
 				// If we are matching the same server then skip.
-				if info.UUID == serverInfo.SUUID {
+				if info.UUID == serverContact.SUUID {
 					continue
 				}
 
@@ -118,25 +118,25 @@ func BaseHandlers() transmission.HandlerMap {
 		"PING": func(m octo.Command, tx transmission.Stream) error {
 			return tx.Send(byteutils.WrapResponseBlock([]byte("PONG"), nil), true)
 		},
-		string(consts.ClientInfoRequest): func(m octo.Command, tx transmission.Stream) error {
-			clientInfo, _ := tx.Info()
+		string(consts.ClientContactRequest): func(m octo.Command, tx transmission.Stream) error {
+			clientContact, _ := tx.Contact()
 
-			infx, err := json.Marshal(clientInfo)
+			infx, err := json.Marshal(clientContact)
 			if err != nil {
 				return err
 			}
 
-			return tx.Send(byteutils.WrapResponseBlock(consts.ClientInfoResponse, infx), true)
+			return tx.Send(byteutils.WrapResponseBlock(consts.ClientContactResponse, infx), true)
 		},
-		string(consts.InfoRequest): func(m octo.Command, tx transmission.Stream) error {
-			_, serverInfo := tx.Info()
+		string(consts.ContactRequest): func(m octo.Command, tx transmission.Stream) error {
+			_, serverContact := tx.Contact()
 
-			infx, err := json.Marshal(serverInfo)
+			infx, err := json.Marshal(serverContact)
 			if err != nil {
 				return err
 			}
 
-			return tx.Send(byteutils.WrapResponseBlock(consts.InfoResponse, infx), true)
+			return tx.Send(byteutils.WrapResponseBlock(consts.ContactResponse, infx), true)
 		},
 	}
 }

@@ -8,11 +8,11 @@ import (
 	"net"
 	"testing"
 
+	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
-	"github.com/influx6/octo/tests"
 	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/udp"
 	"github.com/influx6/octo/utils"
@@ -77,16 +77,16 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 func TestUDPServer(t *testing.T) {
 	// pocket := mock.NewCredentialPocket(octo.AuthCredential{})
 	system := &mockSystem{t: t}
-	server := udp.New(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)}), udp.ServerAttr{
+	server := udp.New(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()}), udp.ServerAttr{
 		Addr:         ":5060",
 		Version:      udp.Ver0,
 		Authenticate: true,
 	})
 
 	if err := server.Listen(system); err != nil {
-		tests.Failed(t, "Should have successfully created udp server: %+q.", err.Error())
+		tests.Failed("Should have successfully created udp server: %+q.", err.Error())
 	}
-	tests.Passed(t, "Should have successfully created udp server.")
+	tests.Passed("Should have successfully created udp server.")
 
 	defer server.Close()
 
@@ -95,42 +95,42 @@ func TestUDPServer(t *testing.T) {
 
 		client, err := mock.NewUDPClient("udp", ":4060", ":5060")
 		if err != nil {
-			tests.Failed(t, "Should have successfully created udp client: %+q.", err.Error())
+			tests.Failed("Should have successfully created udp client: %+q.", err.Error())
 		}
-		tests.Passed(t, "Should have successfully created udp client for %q.", ":4060")
+		tests.Passed("Should have successfully created udp client for %q.", ":4060")
 
 		defer client.Close()
 
-		if merr := sendMessage(t, client, nil, string(consts.InfoRequest)); merr != nil {
-			tests.Failed(t, "Should have successfully delivered message %+q to server due to authentication.", consts.InfoRequest)
+		if merr := sendMessage(t, client, nil, string(consts.ContactRequest)); merr != nil {
+			tests.Failed("Should have successfully delivered message %+q to server due to authentication.", consts.ContactRequest)
 		}
-		tests.Passed(t, "Should have successfully delivered message %+q to server due to authentication.", consts.InfoRequest)
+		tests.Passed("Should have successfully delivered message %+q to server due to authentication.", consts.ContactRequest)
 
 		response, addr, err := client.Read()
 		if err != nil {
-			tests.Failed(t, "Should have successfully received response from udp client from %q: %+q.", err.Error(), addr.String())
+			tests.Failed("Should have successfully received response from udp client from %q: %+q.", err.Error(), addr.String())
 		}
-		tests.Passed(t, "Should have successfully received response from udp client: %q.", addr.String())
+		tests.Passed("Should have successfully received response from udp client: %q.", addr.String())
 
 		commandResponse, err := utils.ToCommand(response)
 		if err != nil {
-			tests.Failed(t, "Should have successfully received command object as response: %+q.", err.Error())
+			tests.Failed("Should have successfully received command object as response: %+q.", err.Error())
 		}
-		tests.Passed(t, "Should have successfully received command object as response.")
+		tests.Passed("Should have successfully received command object as response.")
 
 		if !bytes.Equal(consts.AuthroizationDenied, commandResponse.Name) {
-			tests.Failed(t, "Should have successfully received AuthorizationDenied response without authorization.")
+			tests.Failed("Should have successfully received AuthorizationDenied response without authorization.")
 		}
-		tests.Passed(t, "Should have successfully received AuthorizationDenied response without authorization.")
+		tests.Passed("Should have successfully received AuthorizationDenied response without authorization.")
 	}
 
 	t.Logf("\tWhen connecting to a UDP Server with credentials")
 	{
 		client, err := mock.NewUDPClient("udp", ":6060", ":5060")
 		if err != nil {
-			tests.Failed(t, "Should have successfully created udp client: %+q.", err.Error())
+			tests.Failed("Should have successfully created udp client: %+q.", err.Error())
 		}
-		tests.Passed(t, "Should have successfully created udp client for %q.", ":4060")
+		tests.Passed("Should have successfully created udp client for %q.", ":4060")
 
 		defer client.Close()
 
@@ -142,60 +142,60 @@ func TestUDPServer(t *testing.T) {
 		})
 
 		if err != nil {
-			tests.Failed(t, "Should have successfully converted AuthCredentials to JSON: %+q.", err)
+			tests.Failed("Should have successfully converted AuthCredentials to JSON: %+q.", err)
 		}
-		tests.Passed(t, "Should have successfully converted AuthCredentials to JSON.")
+		tests.Passed("Should have successfully converted AuthCredentials to JSON.")
 
 		if merr := sendMessage(t, client, nil, string(consts.AuthResponse), string(authData)); merr != nil {
-			tests.Failed(t, "Should have successfully delivered message %+q to server due to authentication.", consts.InfoRequest)
+			tests.Failed("Should have successfully delivered message %+q to server due to authentication.", consts.ContactRequest)
 		}
-		tests.Passed(t, "Should have successfully delivered message %+q to server due to authentication.", consts.InfoRequest)
+		tests.Passed("Should have successfully delivered message %+q to server due to authentication.", consts.ContactRequest)
 
 		response, addr, err := client.Read()
 		if err != nil {
-			tests.Failed(t, "Should have successfully received response from udp client from %q: %+q.", err.Error(), addr.String())
+			tests.Failed("Should have successfully received response from udp client from %q: %+q.", err.Error(), addr.String())
 		}
-		tests.Passed(t, "Should have successfully received response from udp client: %q.", addr.String())
+		tests.Passed("Should have successfully received response from udp client: %q.", addr.String())
 
 		commandResponse, err := utils.ToCommand(response)
 		if err != nil {
-			tests.Failed(t, "Should have successfully received command object as response: %+q.", err.Error())
+			tests.Failed("Should have successfully received command object as response: %+q.", err.Error())
 		}
-		tests.Passed(t, "Should have successfully received command object as response.")
+		tests.Passed("Should have successfully received command object as response.")
 
 		if !bytes.Equal(consts.AuthroizationGranted, commandResponse.Name) {
-			tests.Failed(t, "Should have successfully received AuthorizatioGranted response without authorization.")
+			tests.Failed("Should have successfully received AuthorizatioGranted response without authorization.")
 		}
-		tests.Passed(t, "Should have successfully received AuthorizationGranted response without authorization.")
+		tests.Passed("Should have successfully received AuthorizationGranted response without authorization.")
 
-		if merr := sendMessage(t, client, nil, string(consts.InfoRequest)); merr != nil {
-			tests.Failed(t, "Should have successfully delivered message %+q to server due to authentication.", consts.InfoRequest)
+		if merr := sendMessage(t, client, nil, string(consts.ContactRequest)); merr != nil {
+			tests.Failed("Should have successfully delivered message %+q to server due to authentication.", consts.ContactRequest)
 		}
-		tests.Passed(t, "Should have successfully delivered message %+q to server due to authentication.", consts.InfoRequest)
+		tests.Passed("Should have successfully delivered message %+q to server due to authentication.", consts.ContactRequest)
 
 		response2, addr, err := client.Read()
 		if err != nil {
-			tests.Failed(t, "Should have successfully received response from udp client from %q: %+q.", err.Error(), addr.String())
+			tests.Failed("Should have successfully received response from udp client from %q: %+q.", err.Error(), addr.String())
 		}
-		tests.Passed(t, "Should have successfully received response from udp client: %q.", addr.String())
+		tests.Passed("Should have successfully received response from udp client: %q.", addr.String())
 
 		commandResponse2, err := utils.ToCommand(response2)
 		if err != nil {
-			tests.Failed(t, "Should have successfully received command object as response: %+q.", err.Error())
+			tests.Failed("Should have successfully received command object as response: %+q.", err.Error())
 		}
-		tests.Passed(t, "Should have successfully received command object as response.")
+		tests.Passed("Should have successfully received command object as response.")
 
-		if !bytes.Equal(consts.InfoResponse, commandResponse2.Name) {
-			tests.Failed(t, "Should have successfully received InfoResponse response without authorization.")
+		if !bytes.Equal(consts.ContactResponse, commandResponse2.Name) {
+			tests.Failed("Should have successfully received ContactResponse response without authorization.")
 		}
-		tests.Passed(t, "Should have successfully received InfoRespone response without authorization.")
+		tests.Passed("Should have successfully received ContactRespone response without authorization.")
 
 	}
 }
 
 // sendMessage delivers the giving command to the websoket.
 func sendMessage(t *testing.T, conn *mock.UDPClient, addr *net.UDPAddr, command string, data ...string) error {
-	tests.Info(t, "Sending Command: %q Data: %+q, Addr: %q", command, data, addr.String())
+	tests.Info("Sending Command: %q Data: %+q, Addr: %q", command, data, addr.String())
 	var bu bytes.Buffer
 	if err := json.NewEncoder(&bu).Encode(utils.NewCommand(command, data...)); err != nil {
 		return err

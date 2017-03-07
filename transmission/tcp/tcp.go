@@ -57,9 +57,9 @@ func (t *Transmission) Send(data []byte, flush bool) error {
 	return t.client.Send(data, flush)
 }
 
-// Info returns the giving information for the internal client and server.
-func (t *Transmission) Info() (octo.Info, octo.Info) {
-	return t.client.Info()
+// Contact returns the giving information for the internal client and server.
+func (t *Transmission) Contact() (octo.Contact, octo.Contact) {
+	return t.client.Contact()
 }
 
 // Ctx returns the context that is related to this object.
@@ -82,8 +82,8 @@ type Client struct {
 	connectionInitiator   bool
 	parser                octo.Parser
 	instruments           octo.Instrumentation
-	info                  octo.Info
-	cinfo                 octo.Info
+	info                  octo.Contact
+	cinfo                 octo.Contact
 	system                transmission.System
 	primarySystem         *transmission.BaseSystem
 	server                *Server
@@ -193,9 +193,9 @@ func secondsToDuration(seconds float64) time.Duration {
 // does not match standards.
 var ErrInvalidResponse = errors.New("Invalid Response")
 
-// ErrInvalidInfoResponse defines the error returned when a response recieved
+// ErrInvalidContactResponse defines the error returned when a response recieved
 // does not match info response standards.
-var ErrInvalidInfoResponse = errors.New("Invalid Response")
+var ErrInvalidContactResponse = errors.New("Invalid Response")
 
 // ErrAuthInvalidResponse defines the error returned when a response recieved
 // does not match authentication standards and either provides invalid
@@ -230,12 +230,12 @@ func (c *Client) Listen() error {
 	// If we are a clusterClient then attempt to exchange information with new cluster.
 	if c.clusterClient {
 		if !c.connectionInitiator {
-			if err := c.initInfoNegotiation(); err != nil {
+			if err := c.initContactNegotiation(); err != nil {
 				c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Listen", "New Client : Initialization Failed : %s", err)
 				return err
 			}
 		} else {
-			if err := c.initSlaveInfoNegotiation(); err != nil {
+			if err := c.initSlaveContactNegotiation(); err != nil {
 				c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Listen", "New Client : Initialization Failed : %s", err)
 				return err
 			}
@@ -412,10 +412,10 @@ func (c *Client) initClusterNegotiation() error {
 		return ErrAuthInvalidResponse
 	}
 
-	var infos []octo.Info
+	var infos []octo.Contact
 
 	for _, message := range messages[0].Data {
-		var info octo.Info
+		var info octo.Contact
 		if err := json.Unmarshal(message, &info); err != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 			return err
@@ -437,45 +437,45 @@ func (c *Client) initClusterNegotiation() error {
 	return nil
 }
 
-// initSlaveInfoNegotiation initializes the client negotation when the giving client
+// initSlaveContactNegotiation initializes the client negotation when the giving client
 // is not the initiator of the of the cluster connection.
-func (c *Client) initSlaveInfoNegotiation() error {
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation")
+func (c *Client) initSlaveContactNegotiation() error {
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Client Negotiation")
 
 	// Block attempts to read the request for cluster information.
 	{
 		block, err := c.temporaryRead()
 		if err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 			return err
 		}
 
 		messages, err := c.parser.Parse(block)
 		if err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 			return err
 		}
 
-		c.instruments.Log(octo.LOGDEBUG, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Parsed : %+q", messages)
+		c.instruments.Log(octo.LOGDEBUG, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Parsed : %+q", messages)
 
 		if len(messages) < 1 {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Atleast One Response", ErrInvalidResponse)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Atleast One Response", ErrInvalidResponse)
 			return ErrInvalidResponse
 		}
 
-		if !bytes.Equal(messages[0].Name, consts.InfoRequest) {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidInfoResponse)
-			return ErrInvalidInfoResponse
+		if !bytes.Equal(messages[0].Name, consts.ContactRequest) {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidContactResponse)
+			return ErrInvalidContactResponse
 		}
 
-		sinfoData, err := json.Marshal(c.server.clusterInfo)
+		sinfoData, err := json.Marshal(c.server.clusterContact)
 		if err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 			return err
 		}
 
-		if err := c.Send(byteutils.MakeByteMessage(consts.InfoResponse, sinfoData), true); err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Started : Client Negotiation : Initialization Failed : %s", err)
+		if err := c.Send(byteutils.MakeByteMessage(consts.ContactResponse, sinfoData), true); err != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Started : Client Negotiation : Initialization Failed : %s", err)
 			return err
 		}
 	}
@@ -484,20 +484,20 @@ func (c *Client) initSlaveInfoNegotiation() error {
 	{
 		block, err := c.temporaryRead()
 		if err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 			return err
 		}
 
 		messages, err := c.parser.Parse(block)
 		if err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 			return err
 		}
 
-		c.instruments.Log(octo.LOGDEBUG, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Parsed : %+q", messages)
+		c.instruments.Log(octo.LOGDEBUG, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Parsed : %+q", messages)
 
 		if len(messages) < 1 {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Client Negotiation : Initialization Failed : %s : Expected atleast one Response", ErrInvalidResponse)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Client Negotiation : Initialization Failed : %s : Expected atleast one Response", ErrInvalidResponse)
 			return ErrInvalidResponse
 		}
 
@@ -507,7 +507,7 @@ func (c *Client) initSlaveInfoNegotiation() error {
 		}
 	}
 
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initSlaveInfoNegotiation", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initSlaveContactNegotiation", "Completed")
 
 	// Are we required to authenticate first, then run slave authentication procedure first.
 	if c.server.Authenticate {
@@ -518,44 +518,44 @@ func (c *Client) initSlaveInfoNegotiation() error {
 	}
 
 	// Now attempt to retreive information from cluster as well.
-	return c.initInfoNegotiation()
+	return c.initContactNegotiation()
 }
 
-// initInfoNegotiation intiaites the negotiation of client connections.
-func (c *Client) initInfoNegotiation() error {
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initInfoNegotiation", "Started : Client Negotiation")
+// initContactNegotiation intiaites the negotiation of client connections.
+func (c *Client) initContactNegotiation() error {
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initContactNegotiation", "Started : Client Negotiation")
 
-	c.Send(byteutils.WrapResponseBlock(consts.InfoRequest, nil), true)
+	c.Send(byteutils.WrapResponseBlock(consts.ContactRequest, nil), true)
 
 	block, err := c.temporaryRead()
 	if err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initContactNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 		return err
 	}
 
 	messages, err := c.parser.Parse(block)
 	if err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initContactNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 		return err
 	}
 
-	c.instruments.Log(octo.LOGDEBUG, c.info.UUID, "tcp.Client.initInfoNegotiation", "Parsed : %+q", messages)
+	c.instruments.Log(octo.LOGDEBUG, c.info.UUID, "tcp.Client.initContactNegotiation", "Parsed : %+q", messages)
 
 	if len(messages) < 1 {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidResponse)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initContactNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidResponse)
 		return ErrInvalidResponse
 	}
 
-	if !bytes.Equal(messages[0].Name, consts.InfoResponse) {
+	if !bytes.Equal(messages[0].Name, consts.ContactResponse) {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
 		return ErrAuthInvalidResponse
 	}
 
-	var info octo.Info
+	var info octo.Contact
 
 	infoData := bytes.Join(messages[0].Data, []byte(""))
 	if err := json.Unmarshal(infoData, &info); err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initContactNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 		return err
 	}
 
@@ -569,11 +569,11 @@ func (c *Client) initInfoNegotiation() error {
 	// Restore server info as this client belongs here.
 	c.info.SUUID = c.cinfo.SUUID
 
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initInfoNegotiation", "New Client Info : %#v", c.info)
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initContactNegotiation", "New Client Contact : %#v", c.info)
 
 	c.Send(byteutils.MakeByteMessage(consts.OK, nil), true)
 
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initInfoNegotiation", "Completed")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initContactNegotiation", "Completed")
 	return nil
 }
 
@@ -603,7 +603,7 @@ func (c *Client) initSlaveAuthNegotiation() error {
 		}
 
 		if !bytes.Equal(messages[0].Name, consts.AuthRequest) {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidInfoResponse)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidContactResponse)
 			return ErrAuthInvalidResponse
 		}
 
@@ -640,8 +640,8 @@ func (c *Client) initSlaveAuthNegotiation() error {
 			return ErrInvalidResponse
 		}
 
-		if !bytes.Equal(messages[0].Name, consts.OK) {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected OK", ErrAuthInvalidResponse)
+		if !bytes.Equal(messages[0].Name, consts.AuthroizationGranted) {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected AUTHGRANTED", ErrAuthInvalidResponse)
 			return ErrAuthInvalidResponse
 		}
 	}
@@ -697,10 +697,11 @@ func (c *Client) initAuthNegotiation() error {
 
 	if err := c.system.Authenticate(auth); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Authentication Failed : %s", err)
+		c.Send(byteutils.MakeByteMessage(consts.AuthroizationDenied, []byte(err.Error())), true)
 		return err
 	}
 
-	c.Send(byteutils.MakeByteMessage(consts.OK, nil), true)
+	c.Send(byteutils.MakeByteMessage(consts.AuthroizationGranted, nil), true)
 
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed")
 	return nil
@@ -745,7 +746,7 @@ func (c *Client) temporaryRead() ([]byte, error) {
 			c.conn.SetWriteDeadline(time.Time{})
 			c.pl.Unlock()
 
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initInfoNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initContactNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 			c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.temporaryRead", "Completed")
 			return nil, err
 		}
@@ -864,10 +865,10 @@ func (c *Client) Send(data []byte, flush bool) error {
 	return nil
 }
 
-// Info returns the client and server information.
-func (c *Client) Info() (octo.Info, octo.Info) {
+// Contact returns the client and server information.
+func (c *Client) Contact() (octo.Contact, octo.Contact) {
 	if c.clusterClient {
-		return c.info, c.server.clusterInfo
+		return c.info, c.server.clusterContact
 	}
 
 	return c.info, c.server.info
@@ -890,8 +891,8 @@ type ServerAttr struct {
 type Server struct {
 	ServerAttr
 	instruments      octo.Instrumentation
-	info             octo.Info
-	clusterInfo      octo.Info
+	info             octo.Contact
+	clusterContact   octo.Contact
 	listener         net.Listener
 	clusterListener  net.Listener
 	clientSystem     transmission.System
@@ -901,10 +902,10 @@ type Server struct {
 	cg               sync.WaitGroup
 	clientLock       sync.Mutex
 	clients          []*Client
-	clientsInfo      []octo.Info
+	clientsContact   []octo.Contact
 	clusterLock      sync.Mutex
 	clusters         []*Client
-	clustersInfo     []octo.Info
+	clustersContact  []octo.Contact
 	rl               sync.RWMutex
 	running          bool
 }
@@ -933,7 +934,7 @@ func New(instruments octo.Instrumentation, attr ServerAttr) *Server {
 	var s Server
 	s.ServerAttr = attr
 	s.instruments = instruments
-	s.info = octo.Info{
+	s.info = octo.Contact{
 		Remote: attr.Addr,
 		Addr:   attr.Addr,
 		Local:  attr.Addr,
@@ -941,7 +942,7 @@ func New(instruments octo.Instrumentation, attr ServerAttr) *Server {
 		SUUID:  suuid,
 	}
 
-	s.clusterInfo = octo.Info{
+	s.clusterContact = octo.Contact{
 		Remote: attr.ClusterAddr,
 		Addr:   attr.ClusterAddr,
 		UUID:   suuid,
@@ -951,13 +952,13 @@ func New(instruments octo.Instrumentation, attr ServerAttr) *Server {
 	return &s
 }
 
-// CInfo returns the octo.Info related with this server cluster listener.
-func (s *Server) CInfo() octo.Info {
-	return s.clusterInfo
+// CLContact returns the octo.Contact related with this server cluster listener.
+func (s *Server) CLContact() octo.Contact {
+	return s.clusterContact
 }
 
-// Info returns the octo.Info related with this server.
-func (s *Server) Info() octo.Info {
+// Contact returns the octo.Contact related with this server.
+func (s *Server) Contact() octo.Contact {
 	return s.info
 }
 
@@ -1048,7 +1049,7 @@ func (s *Server) Listen(system transmission.System) error {
 
 	if s.ClusterAddr != "" {
 		s.clusterListener, err = net.Listen("tcp", s.ClusterAddr)
-		s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Listen", "New TCP Listener : Cluster : %#v", s.clusterInfo)
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Listen", "New TCP Listener : Cluster : %#v", s.clusterContact)
 		if err != nil {
 			s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.Listen", "Failed to start cluster listener : %s", err.Error())
 			return err
@@ -1110,7 +1111,7 @@ func (s *Server) RelateWithCluster(addr string) error {
 
 	var client Client
 	client = Client{
-		info: octo.Info{
+		info: octo.Contact{
 			Addr:   localAddr,
 			Local:  localAddr,
 			Remote: remoteAddr,
@@ -1142,7 +1143,7 @@ func (s *Server) RelateWithCluster(addr string) error {
 	}
 	s.clusterLock.Unlock()
 
-	s.generateClusterInfo()
+	s.generateClusterContact()
 
 	go func() {
 		client.Wait()
@@ -1153,7 +1154,7 @@ func (s *Server) RelateWithCluster(addr string) error {
 		}
 		s.clusterLock.Unlock()
 
-		s.generateClusterInfo()
+		s.generateClusterContact()
 	}()
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.RelateWithCluster", "Completed")
@@ -1174,14 +1175,14 @@ func (s *Server) ClusterList() []*Client {
 	return s.clusters[0:]
 }
 
-// Clusters returns all Info related to each registered cluster.
-func (s *Server) Clusters() []octo.Info {
+// Clusters returns all Contact related to each registered cluster.
+func (s *Server) Clusters() []octo.Contact {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Clusters", "Started")
 
-	var cluster []octo.Info
+	var cluster []octo.Contact
 
 	s.clusterLock.Lock()
-	cluster = s.clustersInfo[0:]
+	cluster = s.clustersContact[0:]
 	s.clusterLock.Unlock()
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Clusters", "Completed")
@@ -1189,13 +1190,13 @@ func (s *Server) Clusters() []octo.Info {
 }
 
 // Clients returns the giving list of clients and clusters.
-func (s *Server) Clients() []octo.Info {
+func (s *Server) Clients() []octo.Contact {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Clients", "Started")
 
-	var clients []octo.Info
+	var clients []octo.Contact
 
 	s.clientLock.Lock()
-	clients = s.clientsInfo[0:]
+	clients = s.clientsContact[0:]
 	s.clientLock.Unlock()
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Clients", "Completed")
@@ -1219,44 +1220,44 @@ func (s *Server) TransmitToClients(data []byte) error {
 	return nil
 }
 
-// generateClientInfo updates the giving info list for the
+// generateClientContact updates the giving info list for the
 // clients set.
-func (s *Server) generateClientInfo() {
+func (s *Server) generateClientContact() {
 	s.clusterLock.Lock()
 	defer s.clusterLock.Unlock()
 
-	var clients []octo.Info
+	var clients []octo.Contact
 
 	for _, client := range s.clients {
-		clientInfo, _ := client.Info()
-		clients = append(clients, clientInfo)
+		clientContact, _ := client.Contact()
+		clients = append(clients, clientContact)
 	}
 
-	s.clientsInfo = clients
+	s.clientsContact = clients
 }
 
-// generateClusterInfo updates the giving info list for the
+// generateClusterContact updates the giving info list for the
 // clusters set.
-func (s *Server) generateClusterInfo() {
+func (s *Server) generateClusterContact() {
 	s.clusterLock.Lock()
 	defer s.clusterLock.Unlock()
 
-	var clusters []octo.Info
+	var clusters []octo.Contact
 
 	for _, cluster := range s.clusters {
-		clusterInfo, _ := cluster.Info()
-		clusters = append(clusters, clusterInfo)
+		clusterContact, _ := cluster.Contact()
+		clusters = append(clusters, clusterContact)
 	}
 
-	s.clustersInfo = clusters
+	s.clustersContact = clusters
 }
 
-// hasClusterInfo returns true/false if the giving info exists.
-func (s *Server) hasClusterInfo(info octo.Info) bool {
+// hasClusterContact returns true/false if the giving info exists.
+func (s *Server) hasClusterContact(info octo.Contact) bool {
 	s.clusterLock.Lock()
 	defer s.clusterLock.Unlock()
 
-	for _, cu := range s.clustersInfo {
+	for _, cu := range s.clustersContact {
 		if cu.UUID == info.UUID {
 			return true
 		}
@@ -1266,11 +1267,11 @@ func (s *Server) hasClusterInfo(info octo.Info) bool {
 }
 
 // filteredClusters defines a function to handle connection to clusters.
-func (s *Server) filterClusters(infos []octo.Info) []octo.Info {
-	var filtered []octo.Info
+func (s *Server) filterClusters(infos []octo.Contact) []octo.Contact {
+	var filtered []octo.Contact
 
 	for _, info := range infos {
-		if s.hasClusterInfo(info) {
+		if s.hasClusterContact(info) {
 			continue
 		}
 
@@ -1293,7 +1294,7 @@ func (s *Server) filterClusters(infos []octo.Info) []octo.Info {
 }
 
 // HandleClusters handles the connection to provided clusters lists.
-func (s *Server) HandleClusters(infos []octo.Info) {
+func (s *Server) HandleClusters(infos []octo.Contact) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.HandleClusters", "Started")
 	filtered := s.filterClusters(infos)
 
@@ -1356,7 +1357,7 @@ func (s *Server) handleClientConnections(system transmission.System) {
 
 		var client Client
 		client = Client{
-			info: octo.Info{
+			info: octo.Contact{
 				Addr:   remoteAddr,
 				Local:  localAddr,
 				Remote: remoteAddr,
@@ -1392,7 +1393,7 @@ func (s *Server) handleClientConnections(system transmission.System) {
 		s.clientLock.Unlock()
 
 		s.cg.Add(1)
-		s.generateClientInfo()
+		s.generateClientContact()
 
 		go func() {
 			client.Wait()
@@ -1406,7 +1407,7 @@ func (s *Server) handleClientConnections(system transmission.System) {
 			}
 			s.clientLock.Unlock()
 
-			s.generateClientInfo()
+			s.generateClientContact()
 		}()
 
 		continue
@@ -1463,7 +1464,7 @@ func (s *Server) handleClusterConnections(system transmission.System) {
 		var client Client
 		client = Client{
 			parser: blockparser.Blocks,
-			info: octo.Info{
+			info: octo.Contact{
 				Addr:   remoteAddr,
 				Local:  localAddr,
 				Remote: remoteAddr,
@@ -1497,7 +1498,7 @@ func (s *Server) handleClusterConnections(system transmission.System) {
 		s.clusterLock.Unlock()
 
 		s.cg.Add(1)
-		s.generateClusterInfo()
+		s.generateClusterContact()
 
 		go func() {
 			client.Wait()
@@ -1511,7 +1512,7 @@ func (s *Server) handleClusterConnections(system transmission.System) {
 			}
 			s.clusterLock.Unlock()
 
-			s.generateClusterInfo()
+			s.generateClusterContact()
 		}()
 
 		continue

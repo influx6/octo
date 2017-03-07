@@ -76,6 +76,7 @@ func (b blockParser) Parse(msg []byte) ([]octo.Command, error) {
 
 		command = blockParts[0]
 
+		// fmt.Printf("CMD: %+q -> %t\n", command, clipMatch.Match(command))
 		if clipMatch.Match(command) {
 			return nil, errors.New("Invalid Command format")
 		}

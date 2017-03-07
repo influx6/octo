@@ -12,11 +12,11 @@ import (
 
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/clients/goclient"
-	"github.com/influx6/octo/clients/goclient/systems/blocksystem"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
 	"github.com/influx6/octo/parsers/blockparser"
-	uuid "github.com/satori/go.uuid"
+	"github.com/influx6/octo/parsers/byteutils"
+	"github.com/influx6/octo/utils"
 )
 
 // Attr defines a struct which holds configuration options for the TCP
@@ -33,6 +33,7 @@ type Attr struct {
 // TCPPod defines a TCP implementation which connects
 // to a provided TCP endpoint for making requests.
 type TCPPod struct {
+	pub         *octo.Pub
 	attr        Attr
 	instruments octo.Instrumentation
 	servers     []*srvAddr
@@ -44,19 +45,24 @@ type TCPPod struct {
 	base        *goclient.BaseSystem
 	cnl         sync.Mutex
 	doClose     bool
+	started     bool
 	conn        *TCPConn
-	cml         sync.Mutex
-	connects    []goclient.StateHandler
-	disconnects []goclient.StateHandler
-	closes      []goclient.StateHandler
-	errors      []goclient.ErrorStateHandler
 }
 
 // New returns a new instance of the TCP pod.
 func New(insts octo.Instrumentation, attr Attr) (*TCPPod, error) {
 	var pod TCPPod
+	pod.pub = octo.NewPub()
 	pod.attr = attr
 	pod.instruments = insts
+
+	if attr.MaxDrops <= 0 {
+		attr.MaxDrops = consts.MaxTotalConnectionFailure
+	}
+
+	if attr.MaxDrops <= 0 {
+		attr.MaxReconnets = consts.MaxTotalReconnection
+	}
 
 	// Prepare all server registering and validate paths.
 	if err := pod.prepareServers(); err != nil {
@@ -68,15 +74,22 @@ func New(insts octo.Instrumentation, attr Attr) (*TCPPod, error) {
 
 // Listen calls the connection to be create and begins serving requests.
 func (w *TCPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) error {
+	w.cnl.Lock()
+	if w.started {
+		w.cnl.Unlock()
+		return nil
+	}
+	w.cnl.Unlock()
+
 	w.system = sm
 	w.encoding = encoding
 
-	w.base = goclient.NewBaseSystem(
-		blockparser.Blocks,
-		w.instruments,
-		blocksystem.BaseHandlers(),
-		blocksystem.AuthHandlers(sm),
-	)
+	// w.base = goclient.NewBaseSystem(
+	// 	blockparser.Blocks,
+	// 	w.instruments,
+	// 	blocksystem.BaseHandlers(),
+	// 	blocksystem.AuthHandlers(sm),
+	// )
 
 	if err := w.reconnect(); err != nil {
 		return err
@@ -91,14 +104,14 @@ func (w *TCPPod) Close() error {
 		return consts.ErrClosedConnection
 	}
 
-	w.notify(goclient.ClosedHandler, nil)
+	w.notify(octo.ClosedHandler, nil)
 
 	w.cnl.Lock()
 	w.doClose = true
 	w.cnl.Unlock()
 
 	if err := w.conn.Close(); err != nil {
-		w.notify(goclient.ErrorHandler, err)
+		w.notify(octo.ErrorHandler, err)
 
 		w.cnl.Lock()
 		w.conn = nil
@@ -116,45 +129,19 @@ func (w *TCPPod) Close() error {
 }
 
 // Register registers the handler for a given handler.
-func (w *TCPPod) Register(tm goclient.StateHandlerType, hmi interface{}) {
-	var hms goclient.StateHandler
-	var hme goclient.ErrorStateHandler
+func (w *TCPPod) Register(tm octo.StateHandlerType, hmi interface{}) {
+	w.pub.Register(tm, hmi)
+}
 
-	switch ho := hmi.(type) {
-	case goclient.StateHandler:
-		hms = ho
-	case goclient.ErrorStateHandler:
-		hme = ho
+// notify calls the giving callbacks for each different type of state.
+func (w *TCPPod) notify(n octo.StateHandlerType, err error) {
+	var cm octo.Contact
+
+	if w.curAddr != nil {
+		cm = w.curAddr.contact
 	}
 
-	// If the type does not match then return
-	if hme == nil && tm == goclient.ErrorHandler {
-		return
-	}
-
-	// If the type does not match then return
-	if hms == nil && tm != goclient.ErrorHandler {
-		return
-	}
-
-	switch tm {
-	case goclient.ConnectHandler:
-		w.cml.Lock()
-		w.connects = append(w.connects, hms)
-		w.cml.Unlock()
-	case goclient.DisconnectHandler:
-		w.cml.Lock()
-		w.disconnects = append(w.disconnects, hms)
-		w.cml.Unlock()
-	case goclient.ErrorHandler:
-		w.cml.Lock()
-		w.errors = append(w.errors, hme)
-		w.cml.Unlock()
-	case goclient.ClosedHandler:
-		w.cml.Lock()
-		w.closes = append(w.closes, hms)
-		w.cml.Unlock()
-	}
+	w.pub.Notify(n, cm, err)
 }
 
 // Send delivers the giving message to the underline TCP connection.
@@ -192,7 +179,7 @@ type srvAddr struct {
 	connected    bool
 	reconnecting bool
 	lastAttempt  time.Time
-	contact      goclient.Contact
+	contact      octo.Contact
 }
 
 // prepareServers registered all provided address from the attribute as cycling
@@ -201,32 +188,27 @@ func (w *TCPPod) prepareServers() error {
 
 	// Add the main addr if provided.
 	if w.attr.Addr != "" {
-		ep, err := url.Parse(w.attr.Addr)
-		if err != nil {
-			return err
-		}
+		ep, _ := url.Parse(w.attr.Addr)
 
 		w.servers = append(w.servers, &srvAddr{
 			index:   0,
 			ep:      ep,
-			addr:    w.attr.Addr,
-			contact: goclient.Contact{Addr: ep.String(), UUID: uuid.NewV4().String()},
+			addr:    netutils.GetAddr(w.attr.Addr),
+			contact: utils.NewContact(netutils.GetAddr(w.attr.Addr)),
 		})
 	}
 
 	total := len(w.servers)
 
 	for _, addr := range w.attr.Clusters {
-		ep, err := url.Parse(addr)
-		if err != nil {
-			return err
-		}
+
+		ep, _ := url.Parse(addr)
 
 		w.servers = append(w.servers, &srvAddr{
 			index:   total,
 			ep:      ep,
-			addr:    addr,
-			contact: goclient.Contact{Addr: ep.String(), UUID: uuid.NewV4().String()},
+			addr:    netutils.GetAddr(addr),
+			contact: utils.NewContact(netutils.GetAddr(w.attr.Addr)),
 		})
 
 		total++
@@ -243,18 +225,19 @@ func (w *TCPPod) getNextServer() error {
 
 	// Run through the servers and attempt to find another.
 	for index, srv := range w.servers {
+		// fmt.Printf("Src: %#v\n", srv)
 		if srv == nil {
 			continue
 		}
 
 		// If the MaxTotalConnectionFailure is reached, nil this server has bad.
-		if w.attr.MaxDrops <= 0 && srv.drops >= w.attr.MaxDrops {
+		if w.attr.MaxDrops > 0 && srv.drops >= w.attr.MaxDrops {
 			w.servers[index] = nil
 			continue
 		}
 
 		// If the Maximum allow reconnection reached, nil and continue.
-		if w.attr.MaxReconnets <= 0 && srv.recons >= w.attr.MaxReconnets {
+		if w.attr.MaxReconnets > 0 && srv.recons >= w.attr.MaxReconnets {
 			w.servers[index] = nil
 			continue
 		}
@@ -282,14 +265,14 @@ func (w *TCPPod) getNextServer() error {
 // reconnect attempts to retrieve a new server after a failure to connect and then
 // begins message passing.
 func (w *TCPPod) reconnect() error {
-	w.notify(goclient.DisconnectHandler, nil)
+	w.notify(octo.DisconnectHandler, nil)
 
 	if err := w.getNextServer(); err != nil {
 		return err
 	}
 
 	var addr string
-	addr = w.curAddr.ep.String()
+	addr = w.curAddr.addr
 
 	w.cnl.Lock()
 	{
@@ -308,7 +291,7 @@ func (w *TCPPod) reconnect() error {
 
 	conn, err := NewTCPConn(addr, newConf)
 	if err != nil {
-		w.notify(goclient.DisconnectHandler, err)
+		w.notify(octo.DisconnectHandler, err)
 
 		w.cnl.Lock()
 		{
@@ -329,10 +312,10 @@ func (w *TCPPod) reconnect() error {
 	}
 	w.cnl.Unlock()
 
-	w.notify(goclient.ConnectHandler, nil)
+	w.notify(octo.ConnectHandler, nil)
 
 	if err := w.initConnectionSetup(); err != nil {
-		w.notify(goclient.ErrorHandler, err)
+		w.notify(octo.ErrorHandler, err)
 		return err
 	}
 
@@ -344,7 +327,7 @@ func (w *TCPPod) reconnect() error {
 // initConnectionSetup defines a function to initiate the connection
 // procedure generated for using tcp with octo.TCPServers.
 func (w *TCPPod) initConnectionSetup() error {
-	if !w.shouldClose() {
+	if w.shouldClose() {
 		return nil
 	}
 
@@ -354,12 +337,66 @@ func (w *TCPPod) initConnectionSetup() error {
 		return nil
 	}
 
-	data, err := w.conn.Read()
-	if err != nil {
-		return err
+	// Attempt to negotiate authentication with server, we wont allow multiple
+	// messages but only handle one request and if it does not match then fail.
+	{
+		data, err := w.conn.Read()
+		if err != nil {
+			return err
+		}
+
+		cmds, err := blockparser.Blocks.Parse(data)
+		if err != nil {
+			return err
+		}
+
+		if len(cmds) == 0 {
+			return consts.ErrParseError
+		}
+
+		cmd := cmds[0]
+
+		if !bytes.Equal(cmd.Name, consts.AuthRequest) {
+			return consts.ErrInvalidRequestForState
+		}
+
+		credentialData, err := utils.AuthCredentialToJSON(w.system.Credential())
+		if err != nil {
+			return err
+		}
+
+		// cmdData, _, err := utils.NewCommandByte(consts.AuthResponse, credentialData)
+		cmdData := byteutils.MakeByteMessage(consts.AuthResponse, credentialData)
+
+		if err := w.conn.Write(cmdData, true); err != nil {
+			return err
+		}
 	}
 
-	_ = data
+	// Await OK response, else deny connectivity. If we are permitted then,
+	// return as sucessfull.
+	{
+		data, err := w.conn.Read()
+		if err != nil {
+			return err
+		}
+
+		cmds, err := blockparser.Blocks.Parse(data)
+		if err != nil {
+			return err
+		}
+
+		if len(cmds) == 0 {
+			return consts.ErrParseError
+		}
+
+		cmd := cmds[0]
+
+		if !bytes.Equal(cmd.Name, consts.AuthroizationGranted) {
+			return consts.ErrAuthorizationFailed
+		}
+	}
+
 	return nil
 }
 
@@ -373,7 +410,7 @@ func (w *TCPPod) acceptRequests() {
 
 		data, err := w.conn.Read()
 		if err != nil {
-			w.notify(goclient.ErrorHandler, err)
+			w.notify(octo.ErrorHandler, err)
 
 			if err == consts.ErrAbitraryCloseConnection || err == consts.ErrClosedConnection || err == consts.ErrUnstableRead {
 				go w.reconnect()
@@ -385,11 +422,14 @@ func (w *TCPPod) acceptRequests() {
 
 		val, err := w.encoding.Decode(data)
 		if err != nil {
-			w.notify(goclient.ErrorHandler, err)
+			w.notify(octo.ErrorHandler, err)
 			continue
 		}
 
-		w.system.Serve(val, w)
+		if err := w.system.Serve(val, w); err != nil {
+			w.notify(octo.ErrorHandler, err)
+			continue
+		}
 	}
 }
 
@@ -419,46 +459,6 @@ func (w *TCPPod) isClose() bool {
 	return false
 }
 
-// notify calls the giving callbacks for each different type of state.
-func (w *TCPPod) notify(n goclient.StateHandlerType, err error) {
-	var cm goclient.Contact
-
-	if w.curAddr != nil {
-		cm = w.curAddr.contact
-	}
-
-	switch n {
-	case goclient.ErrorHandler:
-		w.cml.Lock()
-		defer w.cml.Unlock()
-
-		for _, handler := range w.errors {
-			handler(cm, err)
-		}
-	case goclient.ConnectHandler:
-		w.cml.Lock()
-		defer w.cml.Unlock()
-
-		for _, handler := range w.connects {
-			handler(cm)
-		}
-	case goclient.DisconnectHandler:
-		w.cml.Lock()
-		defer w.cml.Unlock()
-
-		for _, handler := range w.disconnects {
-			handler(cm)
-		}
-	case goclient.ClosedHandler:
-		w.cml.Lock()
-		defer w.cml.Unlock()
-
-		for _, handler := range w.closes {
-			handler(cm)
-		}
-	}
-}
-
 //================================================================================
 
 // TCPConn defines a interface for a type which connects to
@@ -485,7 +485,7 @@ func NewTCPConn(addr string, tlsConf *tls.Config) (*TCPConn, error) {
 		return nil, err
 	}
 
-	newConn, err := upgradeTLS(conn, tlsConf)
+	newConn, err := netutils.UpgradeConnToTLS(conn, tlsConf)
 	if err != nil {
 		return nil, err
 	}
@@ -496,27 +496,6 @@ func NewTCPConn(addr string, tlsConf *tls.Config) (*TCPConn, error) {
 		reader:        bufio.NewReader(newConn),
 		lastBlockSize: 512,
 	}, nil
-}
-
-// upgradeTLS upgrades the giving tcp connection to use a tls based connection
-// encrypted by the giving tls.Config.
-func upgradeTLS(conn net.Conn, cm *tls.Config) (net.Conn, error) {
-	if cm == nil {
-		return conn, nil
-	}
-
-	if cm.ServerName == "" {
-		h, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
-		cm.ServerName = h
-	}
-
-	tlsConn := tls.Client(conn, cm)
-
-	if err := tlsConn.Handshake(); err != nil {
-		return conn, err
-	}
-
-	return tlsConn, nil
 }
 
 // SetDeadline sets the base deadline of the connection.

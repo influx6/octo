@@ -3,29 +3,26 @@ package mock
 import (
 	"bytes"
 	"errors"
-	"testing"
 
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/parsers/blockparser"
 	"github.com/influx6/octo/transmission"
 )
 
-// System defines a base system which can be used for testing.
-type System struct {
-	t    *testing.T
+// ServerSystem defines a base system which can be used for testing.
+type ServerSystem struct {
 	base octo.AuthCredential
 }
 
-// NewSystem returns a new system instance for accessing a octo.System.
-func NewSystem(t *testing.T, b octo.AuthCredential) System {
-	return System{
-		t:    t,
+// NewServerSystem returns a new system instance for accessing a octo.ServerSystem.
+func NewServerSystem(b octo.AuthCredential) ServerSystem {
+	return ServerSystem{
 		base: b,
 	}
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (System) Serve(message []byte, tx transmission.Stream) error {
+func (ServerSystem) Serve(message []byte, tx transmission.Stream) error {
 	cmds, err := blockparser.Blocks.Parse(message)
 	if err != nil {
 		return err
@@ -49,7 +46,7 @@ func (System) Serve(message []byte, tx transmission.Stream) error {
 
 // Authenticate authenticates the provided credentials and implements
 // the octo.Authenticator interface.
-func (s System) Authenticate(cred octo.AuthCredential) error {
+func (s ServerSystem) Authenticate(cred octo.AuthCredential) error {
 	if cred.Scheme != s.base.Scheme {
 		return errors.New("Scheme does not match")
 	}

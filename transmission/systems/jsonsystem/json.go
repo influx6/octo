@@ -68,25 +68,25 @@ func BaseHandlers() transmission.HandlerMap {
 		"PING": func(m octo.Command, tx transmission.Stream) error {
 			return sendJSON(tx, octo.Command{Name: consts.PONG}, true)
 		},
-		string(consts.ClientInfoRequest): func(m octo.Command, tx transmission.Stream) error {
-			clientInfo, _ := tx.Info()
+		string(consts.ClientContactRequest): func(m octo.Command, tx transmission.Stream) error {
+			clientContact, _ := tx.Contact()
 
-			infx, err := json.Marshal(clientInfo)
+			infx, err := json.Marshal(clientContact)
 			if err != nil {
 				return err
 			}
 
-			return sendJSON(tx, octo.Command{Name: consts.ClientInfoResponse, Data: [][]byte{infx}}, true)
+			return sendJSON(tx, octo.Command{Name: consts.ClientContactResponse, Data: [][]byte{infx}}, true)
 		},
-		string(consts.InfoRequest): func(m octo.Command, tx transmission.Stream) error {
-			_, serverInfo := tx.Info()
+		string(consts.ContactRequest): func(m octo.Command, tx transmission.Stream) error {
+			_, serverContact := tx.Contact()
 
-			infx, err := json.Marshal(serverInfo)
+			infx, err := json.Marshal(serverContact)
 			if err != nil {
 				return err
 			}
 
-			return sendJSON(tx, octo.Command{Name: consts.InfoResponse, Data: [][]byte{infx}}, true)
+			return sendJSON(tx, octo.Command{Name: consts.ContactResponse, Data: [][]byte{infx}}, true)
 		},
 	}
 }

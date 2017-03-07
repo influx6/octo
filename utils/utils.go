@@ -33,11 +33,11 @@ func AuthCredentialToJSON(ac octo.AuthCredential) ([]byte, error) {
 	return data, nil
 }
 
-// NewInfo returns a new instance of a Info object.
-func NewInfo(addr string) octo.Info {
+// NewContact returns a new instance of a octo.Contact object.
+func NewContact(addr string) octo.Contact {
 	addr = netutils.GetAddr(addr)
 
-	return octo.Info{
+	return octo.Contact{
 		Addr:   addr,
 		Remote: addr,
 		Local:  addr,

@@ -34,21 +34,22 @@ type RequestOriginValidator func(*http.Request) bool
 // SocketAttr defines a attribute struct for defining options for the WebsocketServer
 // struct.
 type SocketAttr struct {
-	Addr               string
 	Authenticate       bool
-	Credential         octo.AuthCredential
-	TLSConfig          *tls.Config
 	MessageCompression bool
+	Addr               string
+	TLSConfig          *tls.Config
+	Headers            map[string]string
+	Credential         octo.AuthCredential
 	OriginValidator    RequestOriginValidator
-	Headers            http.Header
 }
 
 // SocketServer defines a struct implements the http.ServeHTTP interface which
 // handles servicing http requests for websockets.
 type SocketServer struct {
 	Attr        SocketAttr
+	headers     http.Header
 	instruments octo.Instrumentation
-	info        octo.Info
+	info        octo.Contact
 	base        *BaseSocketServer
 	server      *http.Server
 	listener    net.Listener
@@ -59,7 +60,7 @@ type SocketServer struct {
 }
 
 // New returns a new instance of a SocketServer.
-func New(attr SocketAttr, instruments octo.Instrumentation) *SocketServer {
+func New(instruments octo.Instrumentation, attr SocketAttr) *SocketServer {
 	ip, port, _ := net.SplitHostPort(attr.Addr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -69,9 +70,17 @@ func New(attr SocketAttr, instruments octo.Instrumentation) *SocketServer {
 
 	var suuid = uuid.NewV4().String()
 
+	headers := make(http.Header)
+
+	for key, val := range attr.Headers {
+		headers.Add(key, val)
+	}
+
 	var ws SocketServer
+	ws.Attr = attr
+	ws.headers = headers
 	ws.instruments = instruments
-	ws.info = octo.Info{
+	ws.info = octo.Contact{
 		SUUID:  suuid,
 		UUID:   suuid,
 		Addr:   attr.Addr,
@@ -83,7 +92,7 @@ func New(attr SocketAttr, instruments octo.Instrumentation) *SocketServer {
 
 // Listen begins the initialization of the websocket server.
 func (s *SocketServer) Listen(system transmission.System) error {
-	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Started")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Started : Addr[%q]", s.Attr.Addr)
 
 	if s.isRunning() {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Completed")
@@ -96,13 +105,22 @@ func (s *SocketServer) Listen(system transmission.System) error {
 		return err
 	}
 
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Listener : %+q", listener.Addr().String())
+
 	server, tlListener, err := netutils.NewHTTPServer(listener, s, s.Attr.TLSConfig)
 	if err != nil {
-		s.instruments.Log(octo.LOGERROR, s.info.UUID, "websocket.SocketServer.Listen", "Initialize net.Listener failed : Error : %s", err.Error())
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "websocket.SocketServer.Listen", "New HTTPServer failed : Error : %s", err.Error())
 		return err
 	}
 
-	s.base = NewBaseSocketServer(BaseSocketAttr{}, s.instruments, s.info, s, system)
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Server : %+q", server.Addr)
+
+	s.base = NewBaseSocketServer(s.instruments, BaseSocketAttr{
+		Headers:            s.headers,
+		Authenticate:       s.Attr.Authenticate,
+		OriginValidator:    s.Attr.OriginValidator,
+		MessageCompression: s.Attr.MessageCompression,
+	}, s.info, s, system)
 
 	s.rl.Lock()
 	{
@@ -199,7 +217,7 @@ type BaseSocketServer struct {
 	MessageCompression bool
 	Attr               BaseSocketAttr
 	instruments        octo.Instrumentation
-	info               octo.Info
+	info               octo.Contact
 	system             transmission.System
 	base               *transmission.BaseSystem
 	cl                 sync.Mutex
@@ -208,7 +226,7 @@ type BaseSocketServer struct {
 }
 
 // NewBaseSocketServer returns a new instance of a BaseSocketServer.
-func NewBaseSocketServer(attr BaseSocketAttr, instruments octo.Instrumentation, info octo.Info, credentials octo.Credentials, system transmission.System) *BaseSocketServer {
+func NewBaseSocketServer(instruments octo.Instrumentation, attr BaseSocketAttr, info octo.Contact, credentials octo.Credentials, system transmission.System) *BaseSocketServer {
 	var base BaseSocketServer
 	base.instruments = instruments
 	base.Attr = attr
@@ -243,8 +261,8 @@ func (s *BaseSocketServer) Clients() []*Client {
 	return s.clients[0:]
 }
 
-// Info returns the giving info struct for the giving socket server.
-func (s *BaseSocketServer) Info() octo.Info {
+// Contact returns the giving info struct for the giving socket server.
+func (s *BaseSocketServer) Contact() octo.Contact {
 	return s.info
 }
 
@@ -253,7 +271,7 @@ func (s *BaseSocketServer) Close() error {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.Close", "Started")
 
 	s.cl.Lock()
-	defer s.cl.Lock()
+	defer s.cl.Unlock()
 
 	for _, client := range s.clients {
 		go client.Close()
@@ -284,7 +302,7 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client.Request = r
 	client.system = s.system
 	client.primary = s.base
-	client.info = octo.Info{
+	client.info = octo.Contact{
 		UUID:   cuuid,
 		SUUID:  s.info.SUUID,
 		Addr:   r.RemoteAddr,
@@ -328,7 +346,7 @@ type Client struct {
 	*websocket.Conn
 	Request     *http.Request
 	instruments octo.Instrumentation
-	info        octo.Info
+	info        octo.Contact
 	system      transmission.System
 	primary     *transmission.BaseSystem
 	wg          sync.WaitGroup
@@ -528,7 +546,7 @@ func (c *Client) acceptRequests() {
 
 		messageType, message, err := c.Conn.ReadMessage()
 		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.acceptRequests", "Type: %d, Message: %+q", messageType, message)
-		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Completed")
+
 		if err != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.acceptRequests", "Error : %q", err.Error())
 
@@ -616,8 +634,8 @@ func (t *Transmission) Send(data []byte, flush bool) error {
 	return t.client.Send(data, flush)
 }
 
-// Info returns the giving information for the internal client and server.
-func (t *Transmission) Info() (octo.Info, octo.Info) {
+// Contact returns the giving information for the internal client and server.
+func (t *Transmission) Contact() (octo.Contact, octo.Contact) {
 	return t.client.info, t.client.server.info
 }
 

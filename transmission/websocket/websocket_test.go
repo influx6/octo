@@ -12,11 +12,12 @@ import (
 	"time"
 
 	gwebsocket "github.com/gorilla/websocket"
+	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
-	"github.com/influx6/octo/tests"
+	"github.com/influx6/octo/netutils"
 	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/websocket"
 	"github.com/influx6/octo/utils"
@@ -74,14 +75,99 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 	return errors.New("Invalid Command")
 }
 
+// TestWebsocketServer validates the behaviour of the websocket that it matches
+// the octo standards.
+func TestWebsocketServer(t *testing.T) {
+	system := &mockSystem{t: t}
+
+	ws := websocket.New(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()}), websocket.SocketAttr{
+		Addr:         ":4050",
+		Authenticate: true,
+		Headers: map[string]string{
+			"X-App-Server": "octo-websocket",
+		},
+	})
+
+	if err := ws.Listen(system); err != nil {
+		tests.Failed("Should have successfully connected to host server ':4050': %s.", err)
+	}
+
+	uri, _ := url.Parse("ws://" + netutils.GetAddr(":4050"))
+
+	t.Logf("\tWhen we make a initial websocket request without Authorization header to %q", uri.String())
+	{
+		conn, _, err := newWebsocketClient(uri.String(), map[string]string{
+			"X-App": "Octo-App",
+		})
+
+		if err == nil {
+			conn.Close()
+			tests.Failed("Should have successfully failed to connect to websocket server without auhorization.")
+		}
+		tests.Passed("Should have successfully failed to connect to websocket server without auhorization.")
+	}
+
+	t.Logf("\tWhen we make a initial websocket request with Authorization header to %q", uri.String())
+	{
+		conn, _, err := newWebsocketClient(uri.String(), map[string]string{
+			"X-App":         "Octo-App",
+			"Authorization": "XBot api-32:auth-4531:BOMTx",
+		})
+
+		if err != nil {
+			tests.Failed("Should have successfully connected to websocket server with auhorization: %q", err.Error())
+		}
+
+		defer conn.Close()
+
+		tests.Passed("Should have successfully connected to websocket server with auhorization")
+	}
+
+	t.Logf("\tWhen we make a initial websocket request for 'INFO' details to %q", uri.String())
+	{
+		conn, _, err := newWebsocketClient(uri.String(), map[string]string{
+			"X-App":         "Octo-App",
+			"Authorization": "XBot api-32:auth-4531:BOMTx",
+		})
+
+		if err != nil {
+			tests.Failed("Should have successfully connected to websocket server with auhorization: %q", err.Error())
+		}
+		tests.Passed("Should have successfully connected to websocket server with auhorization")
+
+		defer conn.Close()
+
+		if err := sendMessage(conn, string(consts.ContactRequest)); err != nil {
+			tests.Failed("Should have successfully delivered 'INFO' messages: %q.", err.Error())
+		}
+		tests.Passed("Should have successfully delivered 'INFO' messages.")
+
+		var cmd octo.Command
+		if err := conn.ReadJSON(&cmd); err != nil {
+			tests.Failed("Should have successfully connected to read messages: %q.", err.Error())
+		}
+		tests.Passed("Should have successfully connected to read messages.")
+
+		if !bytes.Equal(cmd.Name, consts.ContactResponse) {
+			tests.Failed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
+		}
+		tests.Passed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
+
+		if err := conn.WriteControl(gwebsocket.CloseMessage, nil, time.Now().Add(2*time.Second)); err != nil {
+			tests.Failed("Should have successfully delivered 'CLOSE' messages: %q.", err.Error())
+		}
+		tests.Passed("Should have successfully delivered 'CLOSE' messages.")
+	}
+}
+
 // TestWebsocketSystem validates the behaviour of the websocket that it matches
 // the octo standards.
 func TestWebsocketSystem(t *testing.T) {
 	pocket := mock.NewCredentialPocket(octo.AuthCredential{})
 	system := &mockSystem{t: t}
-	ws := websocket.NewBaseSocketServer(websocket.BaseSocketAttr{
+	ws := websocket.NewBaseSocketServer(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()}), websocket.BaseSocketAttr{
 		Authenticate: true,
-	}, instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)}), utils.NewInfo(":6050"), pocket, system)
+	}, utils.NewContact(":6050"), pocket, system)
 
 	server := httptest.NewServer(ws)
 	server.URL = server.URL + "/ws"
@@ -97,9 +183,9 @@ func TestWebsocketSystem(t *testing.T) {
 
 		if err == nil {
 			conn.Close()
-			tests.Failed(t, "Should have successfully failed to connect to websocket server without auhorization.")
+			tests.Failed("Should have successfully failed to connect to websocket server without auhorization.")
 		}
-		tests.Passed(t, "Should have successfully failed to connect to websocket server without auhorization.")
+		tests.Passed("Should have successfully failed to connect to websocket server without auhorization.")
 	}
 
 	t.Logf("\tWhen we make a initial websocket request with Authorization header to %q", serverURL)
@@ -110,12 +196,12 @@ func TestWebsocketSystem(t *testing.T) {
 		})
 
 		if err != nil {
-			tests.Failed(t, "Should have successfully connected to websocket server with auhorization: %q", err.Error())
+			tests.Failed("Should have successfully connected to websocket server with auhorization: %q", err.Error())
 		}
 
 		defer conn.Close()
 
-		tests.Passed(t, "Should have successfully connected to websocket server with auhorization")
+		tests.Passed("Should have successfully connected to websocket server with auhorization")
 	}
 
 	t.Logf("\tWhen we make a initial websocket request for 'INFO' details to %q", serverURL)
@@ -126,32 +212,32 @@ func TestWebsocketSystem(t *testing.T) {
 		})
 
 		if err != nil {
-			tests.Failed(t, "Should have successfully connected to websocket server with auhorization: %q", err.Error())
+			tests.Failed("Should have successfully connected to websocket server with auhorization: %q", err.Error())
 		}
-		tests.Passed(t, "Should have successfully connected to websocket server with auhorization")
+		tests.Passed("Should have successfully connected to websocket server with auhorization")
 
 		defer conn.Close()
 
-		if err := sendMessage(conn, string(consts.InfoRequest)); err != nil {
-			tests.Failed(t, "Should have successfully delivered 'INFO' messages: %q.", err.Error())
+		if err := sendMessage(conn, string(consts.ContactRequest)); err != nil {
+			tests.Failed("Should have successfully delivered 'INFO' messages: %q.", err.Error())
 		}
-		tests.Passed(t, "Should have successfully delivered 'INFO' messages.")
+		tests.Passed("Should have successfully delivered 'INFO' messages.")
 
 		var cmd octo.Command
 		if err := conn.ReadJSON(&cmd); err != nil {
-			tests.Failed(t, "Should have successfully connected to read messages: %q.", err.Error())
+			tests.Failed("Should have successfully connected to read messages: %q.", err.Error())
 		}
-		tests.Passed(t, "Should have successfully connected to read messages.")
+		tests.Passed("Should have successfully connected to read messages.")
 
-		if !bytes.Equal(cmd.Name, consts.InfoResponse) {
-			tests.Failed(t, "Should have successfully received 'INFORES' response: %+q.", cmd.Name)
+		if !bytes.Equal(cmd.Name, consts.ContactResponse) {
+			tests.Failed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
 		}
-		tests.Passed(t, "Should have successfully received 'INFORES' response: %+q.", cmd.Name)
+		tests.Passed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
 
 		if err := conn.WriteControl(gwebsocket.CloseMessage, nil, time.Now().Add(2*time.Second)); err != nil {
-			tests.Failed(t, "Should have successfully delivered 'CLOSE' messages: %q.", err.Error())
+			tests.Failed("Should have successfully delivered 'CLOSE' messages: %q.", err.Error())
 		}
-		tests.Passed(t, "Should have successfully delivered 'CLOSE' messages.")
+		tests.Passed("Should have successfully delivered 'CLOSE' messages.")
 	}
 }
 

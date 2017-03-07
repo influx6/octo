@@ -37,7 +37,7 @@ type WeaveAttr struct {
 type WeaveServer struct {
 	Attr        WeaveAttr
 	instruments octo.Instrumentation
-	info        octo.Info
+	info        octo.Contact
 	server      *http.Server
 	listener    net.Listener
 	mux         *WeaveServerMux
@@ -62,7 +62,7 @@ func New(instrument octo.Instrumentation, attr WeaveAttr) *WeaveServer {
 	var ws WeaveServer
 	ws.closer = make(chan struct{})
 	ws.instruments = instrument
-	ws.info = octo.Info{
+	ws.info = octo.Contact{
 		SUUID:  suuid,
 		UUID:   suuid,
 		Addr:   attr.Addr,
@@ -205,7 +205,7 @@ type TCPTransformer interface {
 type WeaveServerMux struct {
 	Attr               WeaveAttr
 	OverrideTargetAddr string // targetAddr to be used regardless of incoming data from client.
-	info               octo.Info
+	info               octo.Contact
 	auth               octo.Authenticator
 	instruments        octo.Instrumentation
 	transformer        TCPTransformer // if not supplied will send data as is.
@@ -215,7 +215,7 @@ type WeaveServerMux struct {
 // NewWeaveServerMux returns a new instance of a WeaveServerMux which will use the
 // provided targetAddr if provided as destination else use that from the incoming
 // data from the request.
-func NewWeaveServerMux(instruments octo.Instrumentation, auth octo.Authenticator, transfomer TCPTransformer, info octo.Info, targetAddr string, config *tls.Config) *WeaveServerMux {
+func NewWeaveServerMux(instruments octo.Instrumentation, auth octo.Authenticator, transfomer TCPTransformer, info octo.Contact, targetAddr string, config *tls.Config) *WeaveServerMux {
 	ip, port, _ := net.SplitHostPort(targetAddr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {

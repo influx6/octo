@@ -93,8 +93,8 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 		return err
 	}
 
-	clientInfo, _ := tx.Info()
-	infoData, infoErr := json.Marshal(&clientInfo)
+	clientContact, _ := tx.Contact()
+	infoData, infoErr := json.Marshal(&clientContact)
 
 	response, resErr := json.Marshal(&httpweave.TCPResponse{
 		UUID:    treq.UUID,
@@ -127,42 +127,42 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 
 	defer tcpserver.Close()
 
-	t.Logf("\tWhen request %q for a tcp resource through http", consts.InfoRequest)
+	t.Logf("\tWhen request %q for a tcp resource through http", consts.ContactRequest)
 	{
 		header := make(map[string]string)
 		header["X-App"] = "Octo-App"
 		header["Authorization"] = "XBot api-32:auth-4531:BOMTx"
 
-		req, err := newMessageRequest(header, byteutils.MakeByteMessage(consts.InfoRequest))
+		req, err := newMessageRequest(header, byteutils.MakeByteMessage(consts.ContactRequest))
 		if err != nil {
-			tests.Failed(t, "Should have successfully created request for command %q", "info")
+			tests.Failed("Should have successfully created request for command %q", "info")
 		}
-		tests.Passed(t, "Should have successfully created request for command %q", "info")
+		tests.Passed("Should have successfully created request for command %q", "info")
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
 
 		var tcpResponse httpweave.TCPResponse
 		if err := json.NewDecoder(recorder.Body).Decode(&tcpResponse); err != nil {
-			tests.Failed(t, "Should have successfully parsed tcp response from http server for %q: %q", "info", err.Error())
+			tests.Failed("Should have successfully parsed tcp response from http server for %q: %q", "info", err.Error())
 		}
-		tests.Passed(t, "Should have successfully parsed tcp response from http server for %q.", "info")
+		tests.Passed("Should have successfully parsed tcp response from http server for %q.", "info")
 
 		if tcpResponse.Error != nil {
-			tests.Failed(t, "Should have successfully received tcp response with no error: %q", tcpResponse.Error)
+			tests.Failed("Should have successfully received tcp response with no error: %q", tcpResponse.Error)
 		}
-		tests.Passed(t, "Should have successfully received tcp response with no error.")
+		tests.Passed("Should have successfully received tcp response with no error.")
 
-		var info octo.Info
+		var info octo.Contact
 		if err := json.NewDecoder(bytes.NewBuffer(tcpResponse.Data)).Decode(&info); err != nil {
-			tests.Failed(t, "Should have successfully parsed tcp response to generate octo.Command for %q: %q", "info", err.Error())
+			tests.Failed("Should have successfully parsed tcp response to generate octo.Command for %q: %q", "info", err.Error())
 		}
-		tests.Passed(t, "Should have successfully parsed tcp response to generate octo.Command for %q.", "info")
+		tests.Passed("Should have successfully parsed tcp response to generate octo.Command for %q.", "info")
 
-		if info.SUUID != tcpserver.Info().SUUID {
-			tests.Failed(t, "Should have successfully received tcp servers info: %q", info)
+		if info.SUUID != tcpserver.Contact().SUUID {
+			tests.Failed("Should have successfully received tcp servers info: %q", info)
 		}
-		tests.Passed(t, "Should have successfully received tcp servers info.")
+		tests.Passed("Should have successfully received tcp servers info.")
 	}
 }
 
@@ -171,7 +171,7 @@ func newWeaveHTTP(t *testing.T, inst octo.Instrumentation, authenticate octo.Aut
 		inst,
 		authenticate,
 		simpleTCPTransformer{},
-		utils.NewInfo(":5060"),
+		utils.NewContact(":5060"),
 		":7060",
 		nil,
 	)

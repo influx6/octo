@@ -39,7 +39,7 @@ type PushAttr struct {
 type BasicServer struct {
 	Attr        PushAttr
 	instruments octo.Instrumentation
-	info        octo.Info
+	info        octo.Contact
 	server      *http.Server
 	listener    net.Listener
 	wg          sync.WaitGroup
@@ -61,7 +61,7 @@ func New(instruments octo.Instrumentation, attr PushAttr) *BasicServer {
 	var suuid = uuid.NewV4().String()
 
 	var ws BasicServer
-	ws.info = octo.Info{
+	ws.info = octo.Contact{
 		SUUID:  suuid,
 		UUID:   suuid,
 		Addr:   attr.Addr,
@@ -181,12 +181,12 @@ type BasicServeHTTP struct {
 	primary      *transmission.BaseSystem
 	system       transmission.System
 	instruments  octo.Instrumentation
-	info         octo.Info
+	info         octo.Contact
 	authenticate bool
 }
 
 // NewBasicServeHTTP returns a new instance of the BasicServeHTTP object.
-func NewBasicServeHTTP(authenticate bool, inst octo.Instrumentation, info octo.Info, cred octo.Credentials, system transmission.System) *BasicServeHTTP {
+func NewBasicServeHTTP(authenticate bool, inst octo.Instrumentation, info octo.Contact, cred octo.Credentials, system transmission.System) *BasicServeHTTP {
 	primary := transmission.NewBaseSystem(system, jsonparser.JSON, inst, jsonsystem.BaseHandlers(), jsonsystem.AuthHandlers(cred, system))
 
 	return &BasicServeHTTP{
@@ -198,8 +198,8 @@ func NewBasicServeHTTP(authenticate bool, inst octo.Instrumentation, info octo.I
 	}
 }
 
-// Info returns the info object associated with this server.
-func (s *BasicServeHTTP) Info() octo.Info {
+// Contact returns the info object associated with this server.
+func (s *BasicServeHTTP) Contact() octo.Contact {
 	return s.info
 }
 
@@ -219,7 +219,7 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var cuuid = uuid.NewV4().String()
 	var basic BasicTransmission
 	basic.ctx = context.NewGoogleContext(r.Context())
-	basic.info = octo.Info{
+	basic.info = octo.Contact{
 		UUID:   cuuid,
 		SUUID:  s.info.SUUID,
 		Local:  s.info.Addr,
@@ -276,7 +276,7 @@ type BasicTransmission struct {
 	ctx         context.Context
 	server      *BasicServeHTTP
 	system      transmission.System
-	info        octo.Info
+	info        octo.Contact
 	instruments octo.Instrumentation
 	buffer      bytes.Buffer
 }
@@ -343,8 +343,8 @@ func (t *BasicTransmission) Send(data []byte, flush bool) error {
 	return nil
 }
 
-// Info returns the giving information for the internal client and server.
-func (t *BasicTransmission) Info() (octo.Info, octo.Info) {
+// Contact returns the giving information for the internal client and server.
+func (t *BasicTransmission) Contact() (octo.Contact, octo.Contact) {
 	return t.info, t.server.info
 }
 

@@ -20,8 +20,8 @@ import (
 // GetAddr takes the giving address string and if it has no ip or use the
 // zeroth ip format, then modifies the ip with the current systems ip.
 func GetAddr(addr string) string {
-	ip, port, _ := net.SplitHostPort(addr)
-	if ip == "" || ip == "0.0.0.0" {
+	ip, port, err := net.SplitHostPort(addr)
+	if err == nil && ip == "" || ip == "0.0.0.0" {
 		if realIP, err := GetMainIP(); err == nil {
 			return net.JoinHostPort(realIP, port)
 		}
@@ -150,7 +150,7 @@ func MakeListener(protocol string, addr string, conf *tls.Config) (net.Listener,
 	var l net.Listener
 	var err error
 
-	if conf == nil {
+	if conf != nil {
 		l, err = tls.Listen(protocol, addr, conf)
 	} else {
 		l, err = net.Listen(protocol, addr)

@@ -48,7 +48,7 @@ type Server struct {
 	Attr                ServerAttr
 	conn                *net.UDPConn
 	ip                  *net.UDPAddr
-	info                octo.Info
+	info                octo.Contact
 	wg                  sync.WaitGroup
 	rg                  sync.WaitGroup
 	base                *transmission.BaseSystem
@@ -77,7 +77,7 @@ func New(instrument octo.Instrumentation, attr ServerAttr) *Server {
 	}
 
 	suuid := uuid.NewV4().String()
-	s.info = octo.Info{
+	s.info = octo.Contact{
 		Addr:   attr.Addr,
 		Remote: attr.Addr,
 		UUID:   suuid,
@@ -97,8 +97,8 @@ func (s *Server) Credential() octo.AuthCredential {
 	return s.Attr.Credential
 }
 
-// Info returns the octo.Info related with this server.
-func (s *Server) Info() octo.Info {
+// Contact returns the octo.Contact related with this server.
+func (s *Server) Contact() octo.Contact {
 	return s.info
 }
 
@@ -236,7 +236,7 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 	s.instruments.Log(octo.LOGDEBUG, s.info.UUID, "udp.Server.retrieveOrAdd", "Creating New Client : %q : %q", network, addr.String())
 
 	cuuid := uuid.NewV4().String()
-	info := octo.Info{
+	info := octo.Contact{
 		Addr:   addr.IP.String(),
 		Remote: addr.IP.String(),
 		UUID:   cuuid,
@@ -378,7 +378,7 @@ type Client struct {
 	addr        *net.UDPAddr
 	server      *Server
 	ctx         context.Context
-	info        octo.Info
+	info        octo.Contact
 	index       int
 }
 
@@ -521,8 +521,8 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// Info returns the Info objects of the giving client and server.
-func (c *Client) Info() (octo.Info, octo.Info) {
+// Contact returns the Contact objects of the giving client and server.
+func (c *Client) Contact() (octo.Contact, octo.Contact) {
 	return c.info, c.server.info
 }
 

@@ -16,7 +16,7 @@ import (
 // a giving transmit.
 type Stream interface {
 	Close() error
-	Info() (octo.Info, octo.Info)
+	Contact() (octo.Contact, octo.Contact)
 	Ctx() context.Context
 	Send(data []byte, flush bool) error
 	SendAll(data []byte, flush bool) error

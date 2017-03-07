@@ -35,8 +35,8 @@ const (
 	MaxDataWrite              = 6048
 	MaxAcceptableEOF          = 10
 	MaxAcceptableReadTimeout  = 5
-	MaxTotalReconnection      = 5
-	MaxTotalConnectionFailure = 5
+	MaxTotalReconnection      = 20
+	MaxTotalConnectionFailure = 20
 	WSReadTimeout             = 30 * time.Second
 	WSWriteTimeout            = 20 * time.Second
 )
@@ -50,22 +50,22 @@ var (
 // Contains the set of possible request and response headers.
 // Each has it's request and response version.
 var (
-	CTRLLine             = []byte(CTRL)
-	PING                 = []byte("PING")
-	PONG                 = []byte("PONG")
-	ClientInfoRequest    = []byte("CLINFO")
-	ClientInfoResponse   = []byte("CLINFORES")
-	InfoRequest          = []byte("INFO")
-	InfoResponse         = []byte("INFORES")
-	AuthRequest          = []byte("AUTH")
-	AuthResponse         = []byte("AUTHCRED")
-	ClusterRequest       = []byte("CLUSTERS")
-	ClusterResponse      = []byte("CLUSTERRES")
-	ClusterDistRequest   = []byte("CLUSTERDISTRI")
-	ClusterPostOK        = []byte("CLUSTERSOK")
-	AuthroizationDenied  = []byte("AuthDenied")
-	AuthroizationGranted = []byte("AuthGranted")
-	OK                   = []byte("OK")
+	CTRLLine              = []byte(CTRL)
+	PING                  = []byte("PING")
+	PONG                  = []byte("PONG")
+	ClientContactRequest  = []byte("CLINFO")
+	ClientContactResponse = []byte("CLINFORES")
+	ContactRequest        = []byte("INFO")
+	ContactResponse       = []byte("INFORES")
+	AuthRequest           = []byte("AUTH")
+	AuthResponse          = []byte("AUTHCRED")
+	ClusterRequest        = []byte("CLUSTERS")
+	ClusterResponse       = []byte("CLUSTERRES")
+	ClusterDistRequest    = []byte("CLUSTERDISTRI")
+	ClusterPostOK         = []byte("CLUSTERSOK")
+	AuthroizationDenied   = []byte("AuthDenied")
+	AuthroizationGranted  = []byte("AuthGranted")
+	OK                    = []byte("OK")
 )
 
 // contains the set of errors used by the package.
@@ -78,6 +78,14 @@ var (
 	ErrUnstableWrite = errors.New("Connection write was unstable")
 
 	ErrNoServerFound = errors.New("Available server not found")
+
+	ErrParseError = errors.New("Parser failed to parse")
+
+	ErrNoAuthorizationHeader = errors.New("Has no 'Authorization' header for authentication")
+
+	ErrInvalidAuthentication = errors.New("Server invalidated authentication credentials")
+
+	ErrInvalidRequestForState = errors.New("Recieved message fails to match expecte for current phase/state")
 
 	// ErrRequestUnsearvable defines the error returned when a request can not
 	// be handled.
