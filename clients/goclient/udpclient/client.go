@@ -13,7 +13,7 @@ import (
 	"github.com/influx6/octo/clients/goclient"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
-	uuid "github.com/satori/go.uuid"
+	"github.com/influx6/octo/utils"
 )
 
 // Attr defines a struct which holds configuration options for the UDP
@@ -31,25 +31,36 @@ type Attr struct {
 // to a provided UDP endpoint for making requests.
 type UDPPod struct {
 	attr        Attr
+	localAddr   string
+	instruments octo.Instrumentation
+	pub         *octo.Pub
 	servers     []*srvAddr
 	curAddr     *srvAddr
 	bm          bytes.Buffer
 	wg          sync.WaitGroup
 	system      goclient.System
+	encoding    goclient.MessageEncoding
 	cnl         sync.Mutex
 	doClose     bool
+	started     bool
 	conn        *UDPConn
-	cml         sync.Mutex
-	connects    []goclient.StateHandler
-	disconnects []goclient.StateHandler
-	closes      []goclient.StateHandler
-	errors      []goclient.ErrorStateHandler
 }
 
-// New returns a new instance of the UDP pod.
-func New(logs octo.Logs, attr Attr) (*UDPPod, error) {
+// New returns a new instance of the websocket pod.
+func New(insts octo.Instrumentation, attr Attr) (*UDPPod, error) {
 	var pod UDPPod
 	pod.attr = attr
+	pod.instruments = insts
+	pod.pub = octo.NewPub()
+	pod.localAddr = netutils.GetAddr(attr.ClientAddr)
+
+	if attr.MaxDrops <= 0 {
+		attr.MaxDrops = consts.MaxTotalConnectionFailure
+	}
+
+	if attr.MaxDrops <= 0 {
+		attr.MaxReconnets = consts.MaxTotalReconnection
+	}
 
 	// Prepare all server registering and validate paths.
 	if err := pod.prepareServers(); err != nil {
@@ -60,8 +71,16 @@ func New(logs octo.Logs, attr Attr) (*UDPPod, error) {
 }
 
 // Listen calls the connection to be create and begins serving requests.
-func (w *UDPPod) Listen(sm goclient.System) error {
+func (w *UDPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) error {
+	w.cnl.Lock()
+	if w.started {
+		w.cnl.Unlock()
+		return nil
+	}
+	w.cnl.Unlock()
+
 	w.system = sm
+	w.encoding = encoding
 
 	if err := w.reconnect(); err != nil {
 		return err
@@ -70,20 +89,20 @@ func (w *UDPPod) Listen(sm goclient.System) error {
 	return nil
 }
 
-// Close closes the UDP connection.
+// Close closes the websocket connection.
 func (w *UDPPod) Close() error {
 	if w.isClose() {
 		return consts.ErrClosedConnection
 	}
 
-	w.notify(goclient.ClosedHandler, nil)
+	w.notify(octo.ClosedHandler, nil)
 
 	w.cnl.Lock()
 	w.doClose = true
 	w.cnl.Unlock()
 
 	if err := w.conn.Close(); err != nil {
-		w.notify(goclient.ErrorHandler, err)
+		w.notify(octo.ErrorHandler, err)
 
 		w.cnl.Lock()
 		w.conn = nil
@@ -101,100 +120,44 @@ func (w *UDPPod) Close() error {
 }
 
 // Register registers the handler for a given handler.
-func (w *UDPPod) Register(tm goclient.StateHandlerType, hmi interface{}) {
-	var hms goclient.StateHandler
-	var hme goclient.ErrorStateHandler
-
-	switch ho := hmi.(type) {
-	case goclient.StateHandler:
-		hms = ho
-	case goclient.ErrorStateHandler:
-		hme = ho
-	}
-
-	// If the type does not match then return
-	if hme == nil && tm == goclient.ErrorHandler {
-		return
-	}
-
-	// If the type does not match then return
-	if hms == nil && tm != goclient.ErrorHandler {
-		return
-	}
-
-	switch tm {
-	case goclient.ConnectHandler:
-		w.cml.Lock()
-		w.connects = append(w.connects, hms)
-		w.cml.Unlock()
-	case goclient.DisconnectHandler:
-		w.cml.Lock()
-		w.disconnects = append(w.disconnects, hms)
-		w.cml.Unlock()
-	case goclient.ErrorHandler:
-		w.cml.Lock()
-		w.errors = append(w.errors, hme)
-		w.cml.Unlock()
-	case goclient.ClosedHandler:
-		w.cml.Lock()
-		w.closes = append(w.closes, hms)
-		w.cml.Unlock()
-	}
+func (w *UDPPod) Register(tm octo.StateHandlerType, hmi interface{}) {
+	w.pub.Register(tm, hmi)
 }
 
-// Send delivers the giving message to the underline UDP connection.
-func (w *UDPPod) Send(data []byte, flush bool) error {
+// notify calls the giving callbacks for each different type of state.
+func (w *UDPPod) notify(n octo.StateHandlerType, err error) {
+	var cm octo.Contact
+
+	if w.curAddr != nil {
+		cm = w.curAddr.contact
+	}
+
+	w.pub.Notify(n, cm, err)
+}
+
+// Send delivers the giving message to the underline websocket connection.
+func (w *UDPPod) Send(data interface{}, flush bool) error {
+
+	// Encode outside of lock to reduce contention.
+	dataBytes, err := w.encoding.Encode(data)
+	if err != nil {
+		return err
+	}
+
 	w.cnl.Lock()
 	if w.curAddr != nil && !w.curAddr.connected && !w.curAddr.reconnecting {
 		w.cnl.Unlock()
-		w.bm.Write(data)
+		w.bm.Write(dataBytes)
 		return nil
 	}
 	w.cnl.Unlock()
 
-	return w.conn.Write(data, flush)
-}
-
-// acceptRequests processing the connections for incoming messages.
-func (w *UDPPod) acceptRequests() {
-	w.wg.Add(1)
-	defer w.wg.Done()
-
-	for !w.shouldClose() {
-		w.conn.SetReadDeadline(time.Now().Add(consts.WSReadTimeout))
-
-		data, addr, err := w.conn.Read()
-		if err != nil {
-			w.notify(goclient.ErrorHandler, err)
-
-			if err == consts.ErrAbitraryCloseConnection || err == consts.ErrClosedConnection || err == consts.ErrUnstableRead {
-				go w.reconnect()
-				return
-			}
-
-			continue
-		}
-
-		w.system.Serve(data, &ulink{UDPPod: w, targetAddr: addr})
+	if w.bm.Len() > 0 {
+		w.conn.Write(w.bm.Bytes(), false)
+		w.bm.Reset()
 	}
-}
 
-type ulink struct {
-	*UDPPod
-	targetAddr *net.UDPAddr
-}
-
-// Send delivers the giving message to the underline addr.
-func (l *ulink) Send(data []byte, flush bool) error {
-	l.UDPPod.cnl.Lock()
-	if l.UDPPod.curAddr != nil && !l.UDPPod.curAddr.connected && !l.UDPPod.curAddr.reconnecting {
-		l.UDPPod.cnl.Unlock()
-		l.UDPPod.bm.Write(data)
-		return nil
-	}
-	l.UDPPod.cnl.Unlock()
-
-	return l.UDPPod.conn.WriteUDP(data, l.targetAddr)
+	return w.conn.Write(dataBytes, flush)
 }
 
 // srvAddr defines a struct for storing addr details.
@@ -206,7 +169,7 @@ type srvAddr struct {
 	addr         string
 	connected    bool
 	reconnecting bool
-	contact      goclient.Contact
+	contact      octo.Contact
 }
 
 // prepareServers registered all provided address from the attribute as cycling
@@ -215,7 +178,10 @@ func (w *UDPPod) prepareServers() error {
 
 	// Add the main addr if provided.
 	if w.attr.Addr != "" {
+		w.attr.Addr = netutils.GetAddr(w.attr.Addr)
+
 		ep, err := url.Parse(w.attr.Addr)
+		// fmt.Printf("Preping: %q -> %+q <- %q", w.attr.Addr, ep, err)
 		if err != nil {
 			return err
 		}
@@ -224,13 +190,15 @@ func (w *UDPPod) prepareServers() error {
 			index:   0,
 			ep:      ep,
 			addr:    w.attr.Addr,
-			contact: goclient.Contact{Addr: ep.String(), UUID: uuid.NewV4().String()},
+			contact: utils.NewContact(w.attr.Addr),
 		})
 	}
 
 	total := len(w.servers)
 
 	for _, addr := range w.attr.Clusters {
+		addr = netutils.GetAddr(addr)
+
 		ep, err := url.Parse(addr)
 		if err != nil {
 			return err
@@ -240,7 +208,7 @@ func (w *UDPPod) prepareServers() error {
 			index:   total,
 			ep:      ep,
 			addr:    addr,
-			contact: goclient.Contact{Addr: ep.String(), UUID: uuid.NewV4().String()},
+			contact: utils.NewContact(addr),
 		})
 
 		total++
@@ -262,13 +230,13 @@ func (w *UDPPod) getNextServer() error {
 		}
 
 		// If the MaxTotalConnectionFailure is reached, nil this server has bad.
-		if w.attr.MaxDrops <= 0 && srv.drops >= w.attr.MaxDrops {
+		if w.attr.MaxDrops > 0 && srv.drops >= w.attr.MaxDrops {
 			w.servers[index] = nil
 			continue
 		}
 
 		// If the Maximum allow reconnection reached, nil and continue.
-		if w.attr.MaxReconnets <= 0 && srv.recons >= w.attr.MaxReconnets {
+		if w.attr.MaxReconnets > 0 && srv.recons >= w.attr.MaxReconnets {
 			w.servers[index] = nil
 			continue
 		}
@@ -296,7 +264,18 @@ func (w *UDPPod) getNextServer() error {
 // reconnect attempts to retrieve a new server after a failure to connect and then
 // begins message passing.
 func (w *UDPPod) reconnect() error {
-	w.notify(goclient.DisconnectHandler, nil)
+	if w.attr.Authenticate && w.attr.Headers != nil {
+		if _, ok := w.attr.Headers["Authorization"]; !ok {
+			return consts.ErrNoAuthorizationHeader
+		}
+	}
+
+	w.cnl.Lock()
+	if w.started {
+		w.cnl.Unlock()
+		w.notify(octo.DisconnectHandler, nil)
+	}
+	w.cnl.Unlock()
 
 	if err := w.getNextServer(); err != nil {
 		return err
@@ -305,29 +284,91 @@ func (w *UDPPod) reconnect() error {
 	var addr string
 
 	w.cnl.Lock()
-	w.curAddr.reconnecting = true
-	w.curAddr.connected = false
-	addr = w.curAddr.ep.String()
+	{
+		w.curAddr.reconnecting = true
+		w.curAddr.connected = false
+		w.curAddr.recons++
+
+		if w.curAddr.ep != nil {
+			addr = w.curAddr.ep.String()
+		} else {
+			addr = w.curAddr.addr
+		}
+	}
 	w.cnl.Unlock()
 
-	conn, err := NewUDPConn(w.attr.Version, w.attr.ClientAddr, addr)
+	conn, err := NewUDPConn(w.attr.Version, w.localAddr, addr)
 	if err != nil {
-		w.notify(goclient.DisconnectHandler, err)
+		w.notify(octo.DisconnectHandler, err)
+		w.curAddr.drops++
 		return w.reconnect()
 	}
 
 	w.cnl.Lock()
+	w.started = true
 	w.conn = conn
 	w.curAddr.connected = true
 	w.curAddr.reconnecting = false
 	w.cnl.Unlock()
 
-	w.notify(goclient.ConnectHandler, nil)
+	w.notify(octo.ConnectHandler, nil)
 
-	w.wg.Add(1)
 	go w.acceptRequests()
 
 	return nil
+}
+
+// acceptRequests processing the connections for incoming messages.
+func (w *UDPPod) acceptRequests() {
+	w.wg.Add(1)
+	defer w.wg.Done()
+
+	for !w.shouldClose() {
+		w.conn.SetReadDeadline(time.Now().Add(consts.WSReadTimeout))
+
+		// fmt.Printf("StartWSSocket:Reading Accept: \n")
+		data, addr, err := w.conn.Read()
+		// fmt.Printf("Accept::Err: %+q\n", err)
+		if err != nil {
+			w.notify(octo.ErrorHandler, err)
+
+			if err == consts.ErrAbitraryCloseConnection || err == consts.ErrClosedConnection || err == consts.ErrUnstableRead {
+				go w.reconnect()
+				return
+			}
+
+			continue
+		}
+
+		val, err := w.encoding.Decode(data)
+		if err != nil {
+			w.notify(octo.ErrorHandler, err)
+			continue
+		}
+
+		if err := w.system.Serve(val, &ulink{UDPPod: w, targetAddr: addr}); err != nil {
+			w.notify(octo.ErrorHandler, err)
+			continue
+		}
+	}
+}
+
+type ulink struct {
+	*UDPPod
+	targetAddr *net.UDPAddr
+}
+
+// Send delivers the giving message to the underline addr.
+func (l *ulink) Send(data []byte, flush bool) error {
+	l.UDPPod.cnl.Lock()
+	if l.UDPPod.curAddr != nil && !l.UDPPod.curAddr.connected && !l.UDPPod.curAddr.reconnecting {
+		l.UDPPod.cnl.Unlock()
+		l.UDPPod.bm.Write(data)
+		return nil
+	}
+	l.UDPPod.cnl.Unlock()
+
+	return l.UDPPod.conn.WriteUDP(data, l.targetAddr)
 }
 
 // shouldClose returns true/false if the giving connection should close.
@@ -354,46 +395,6 @@ func (w *UDPPod) isClose() bool {
 	w.cnl.Unlock()
 
 	return false
-}
-
-// notify calls the giving callbacks for each different type of state.
-func (w *UDPPod) notify(n goclient.StateHandlerType, err error) {
-	var cm goclient.Contact
-
-	if w.curAddr != nil {
-		cm = w.curAddr.contact
-	}
-
-	switch n {
-	case goclient.ErrorHandler:
-		w.cml.Lock()
-		defer w.cml.Unlock()
-
-		for _, handler := range w.errors {
-			handler(cm, err)
-		}
-	case goclient.ConnectHandler:
-		w.cml.Lock()
-		defer w.cml.Unlock()
-
-		for _, handler := range w.connects {
-			handler(cm)
-		}
-	case goclient.DisconnectHandler:
-		w.cml.Lock()
-		defer w.cml.Unlock()
-
-		for _, handler := range w.disconnects {
-			handler(cm)
-		}
-	case goclient.ClosedHandler:
-		w.cml.Lock()
-		defer w.cml.Unlock()
-
-		for _, handler := range w.closes {
-			handler(cm)
-		}
-	}
 }
 
 //================================================================================

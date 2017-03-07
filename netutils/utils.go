@@ -20,6 +20,12 @@ import (
 // GetAddr takes the giving address string and if it has no ip or use the
 // zeroth ip format, then modifies the ip with the current systems ip.
 func GetAddr(addr string) string {
+	if addr == "" {
+		if real, err := GetMainIP(); err == nil {
+			return real + ":0"
+		}
+	}
+
 	ip, port, err := net.SplitHostPort(addr)
 	if err == nil && ip == "" || ip == "0.0.0.0" {
 		if realIP, err := GetMainIP(); err == nil {
