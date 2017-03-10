@@ -25,7 +25,7 @@ type WeaveAttr struct {
 	Addr          string
 	TargetAddr    string
 	Headers       http.Header
-	Transformer   TCPTransformer
+	Transformer   octo.TCPTransformer
 	Auth          octo.Authenticator
 	TLSConfig     *tls.Config
 	TCPTLSConfig  *tls.Config
@@ -173,33 +173,6 @@ func (s *WeaveServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 //================================================================================
 
-// TCPRequest defines the request which will be recieved from the client to make
-// the tcp request and associated data.
-type TCPRequest struct {
-	UUID string `json:"uuid"`
-	Addr string `json:"addr"`
-	Data []byte `json:"data"`
-}
-
-// TCPResponse defines response object which will be delivered back to the client
-// as tcp server response.
-type TCPResponse struct {
-	UUID    string     `json:"uuid"`
-	Error   error      `json:"error"`
-	Status  bool       `json:"status"`
-	Data    []byte     `json:"data"`
-	Request TCPRequest `json:"request"`
-}
-
-// TCPTransformer defines function type which takes the provided TCPRequest and transfroms
-// it into the expected format for communicate through a tcp connection.
-type TCPTransformer interface {
-	TransformRequest(TCPRequest) ([]byte, error)
-	TransformResponse(data []byte) (TCPResponse, error)
-}
-
-//================================================================================
-
 // WeaveServerMux defines a struct which implements the http.Handler interface for
 // handling http server-sent requests.
 type WeaveServerMux struct {
@@ -208,14 +181,14 @@ type WeaveServerMux struct {
 	info               octo.Contact
 	auth               octo.Authenticator
 	instruments        octo.Instrumentation
-	transformer        TCPTransformer // if not supplied will send data as is.
+	transformer        octo.TCPTransformer // if not supplied will send data as is.
 	config             *tls.Config
 }
 
 // NewWeaveServerMux returns a new instance of a WeaveServerMux which will use the
 // provided targetAddr if provided as destination else use that from the incoming
 // data from the request.
-func NewWeaveServerMux(instruments octo.Instrumentation, auth octo.Authenticator, transfomer TCPTransformer, info octo.Contact, targetAddr string, config *tls.Config) *WeaveServerMux {
+func NewWeaveServerMux(instruments octo.Instrumentation, auth octo.Authenticator, transfomer octo.TCPTransformer, info octo.Contact, targetAddr string, config *tls.Config) *WeaveServerMux {
 	ip, port, _ := net.SplitHostPort(targetAddr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -299,11 +272,11 @@ func (s *WeaveServerMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 
-	var tcpRequest TCPRequest
+	var tcpRequest octo.TCPRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&tcpRequest); err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpweave.WeaveServer.ServeHTTP", "Completed : Error : Failed to parse : %+q", err)
-		http.Error(w, "Expected TCPRequest JSON: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Expected octo.TCPRequest JSON: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -317,7 +290,7 @@ func (s *WeaveServerMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpweave.WeaveServer.ServeHTTP", "Completed : Error : Failed to transform tcp request: %+q", err)
-		http.Error(w, "Failed to transform TCPRequest for tcp connection: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to transform octo.TCPRequest for tcp connection: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -330,7 +303,7 @@ func (s *WeaveServerMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a new TCPClient with the appropriate address and then write the new
-	// TCPRequest and read until response and wire to response.
+	// octo.TCPRequest and read until response and wire to response.
 	client, err := NewTCPClient(targetAddr, s.config)
 	if err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpweave.WeaveServer.ServeHTTP", "Completed : Error : Failed to create new tcpclient : %+q", err)

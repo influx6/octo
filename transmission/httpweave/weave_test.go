@@ -8,12 +8,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/parsers/byteutils"
-	"github.com/influx6/octo/tests"
 	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/httpweave"
 	"github.com/influx6/octo/transmission/tcp"
@@ -36,7 +36,7 @@ type simpleTCPTransformer struct{}
 
 // TransformRequest returns the appropriate data for a giving TCPRequest struct value,
 // This function simply jsonifies the giving requests.
-func (simpleTCPTransformer) TransformRequest(t httpweave.TCPRequest) ([]byte, error) {
+func (simpleTCPTransformer) TransformRequest(t octo.TCPRequest) ([]byte, error) {
 	data, err := json.Marshal(t)
 	if err != nil {
 		return nil, err
@@ -47,8 +47,8 @@ func (simpleTCPTransformer) TransformRequest(t httpweave.TCPRequest) ([]byte, er
 
 // TransformResponse returns a TCPResponse value by using the json parser to parse
 // the provided data.
-func (simpleTCPTransformer) TransformResponse(data []byte) (httpweave.TCPResponse, error) {
-	var res httpweave.TCPResponse
+func (simpleTCPTransformer) TransformResponse(data []byte) (octo.TCPResponse, error) {
+	var res octo.TCPResponse
 
 	if err := json.Unmarshal(data, &res); err != nil {
 		return res, err
@@ -87,7 +87,7 @@ func (mockSystem) Authenticate(cred octo.AuthCredential) error {
 
 // Serve handles the processing of different requests coming from the outside.
 func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
-	var treq httpweave.TCPRequest
+	var treq octo.TCPRequest
 
 	if err := json.Unmarshal(message, &treq); err != nil {
 		return err
@@ -96,7 +96,7 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 	clientContact, _ := tx.Contact()
 	infoData, infoErr := json.Marshal(&clientContact)
 
-	response, resErr := json.Marshal(&httpweave.TCPResponse{
+	response, resErr := json.Marshal(&octo.TCPResponse{
 		UUID:    treq.UUID,
 		Status:  true,
 		Data:    infoData,
@@ -116,7 +116,7 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 func TestHTTPBaiscProtocol(t *testing.T) {
 	system := &mockSystem{t: t}
 	pocket := mock.NewCredentialPocket(octo.AuthCredential{})
-	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)})
+	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()})
 
 	server := newWeaveHTTP(t, inst, system, pocket, system)
 	tcpserver := tcp.New(inst, tcp.ServerAttr{
@@ -142,7 +142,7 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
 
-		var tcpResponse httpweave.TCPResponse
+		var tcpResponse octo.TCPResponse
 		if err := json.NewDecoder(recorder.Body).Decode(&tcpResponse); err != nil {
 			tests.Failed("Should have successfully parsed tcp response from http server for %q: %q", "info", err.Error())
 		}
@@ -179,7 +179,7 @@ func newWeaveHTTP(t *testing.T, inst octo.Instrumentation, authenticate octo.Aut
 
 // newMessageRequest returns a new request with the provided body as a command set.
 func newMessageRequest(header map[string]string, data []byte) (*http.Request, error) {
-	var tcpreq httpweave.TCPRequest
+	var tcpreq octo.TCPRequest
 	tcpreq.UUID = uuid.NewV4().String()
 	tcpreq.Data = data
 

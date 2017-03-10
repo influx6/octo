@@ -17,6 +17,33 @@ const (
 
 //================================================================================
 
+// TCPRequest defines the request which will be recieved from the client to make
+// the tcp request and associated data.
+type TCPRequest struct {
+	UUID string `json:"uuid"`
+	Addr string `json:"addr"`
+	Data []byte `json:"data"`
+}
+
+// TCPResponse defines response object which will be delivered back to the client
+// as tcp server response.
+type TCPResponse struct {
+	UUID    string     `json:"uuid"`
+	Error   error      `json:"error"`
+	Status  bool       `json:"status"`
+	Data    []byte     `json:"data"`
+	Request TCPRequest `json:"request"`
+}
+
+// TCPTransformer defines function type which takes the provided TCPRequest and transfroms
+// it into the expected format for communicate through a tcp connection.
+type TCPTransformer interface {
+	TransformRequest(TCPRequest) ([]byte, error)
+	TransformResponse(data []byte) (TCPResponse, error)
+}
+
+//================================================================================
+
 // Command defines a struct which holds the giving operation expected to be performed,
 // It provides the name and data of command expected.
 type Command struct {
