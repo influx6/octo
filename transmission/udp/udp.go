@@ -13,7 +13,6 @@ import (
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
-	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/parsers/jsonparser"
 	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/systems/jsonsystem"
@@ -354,7 +353,7 @@ func (s *Server) handleConnections(system transmission.System) {
 
 			// Handle remaining messages and pass it to user system.
 			if rem != nil {
-				if err := s.system.Serve(byteutils.JoinMessages(rem...), tx); err != nil {
+				if err := s.system.Serve(rem, tx); err != nil {
 					s.instruments.Log(octo.LOGERROR, s.info.UUID, "udp.Server.handleConnections", "UDP Base System : Fails Parsing : Error : %+s", err)
 					return
 				}

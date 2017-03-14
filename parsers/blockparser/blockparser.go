@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	"github.com/influx6/octo"
+	"github.com/influx6/octo/parsers/byteutils"
 )
 
 var (
@@ -47,6 +48,23 @@ var Blocks blockParser
 
 // blockParser defines a struct for the blockParser.
 type blockParser struct{}
+
+// Unparse turns the provided item into a byte slice, it expects either a
+// command or slice of commands.
+func (b blockParser) Unparse(msg interface{}) ([]byte, error) {
+	if msg == nil {
+		return nil, nil
+	}
+
+	switch item := msg.(type) {
+	case octo.Command:
+		return byteutils.JoinMessages(item), nil
+	case []octo.Command:
+		return byteutils.JoinMessages(item...), nil
+	}
+
+	return nil, errors.New("Invalid Data")
+}
 
 // Parse parses the data data coming in and produces a series of Messages
 // based on a base pattern.

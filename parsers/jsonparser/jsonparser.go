@@ -13,6 +13,23 @@ var JSON jsonparser
 
 type jsonparser struct{}
 
+// Unparse takes a giving value and transforms it into a giving byte slice.
+// It expects a command or a slice of commands.
+func (jsonparser) Unparse(msg interface{}) ([]byte, error) {
+	if msg == nil {
+		return nil, nil
+	}
+
+	switch item := msg.(type) {
+	case octo.Command:
+		return json.Marshal([]octo.Command{item})
+	case []octo.Command:
+		return json.Marshal(item)
+	}
+
+	return nil, errors.New("Invalid Data")
+}
+
 // Parse attempts to use `encode/json` to parse giving byte into a slice of command
 // objects.
 func (jsonparser) Parse(msg []byte) ([]octo.Command, error) {

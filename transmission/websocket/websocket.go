@@ -19,7 +19,6 @@ import (
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
-	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/parsers/jsonparser"
 	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/systems/jsonsystem"
@@ -592,7 +591,7 @@ func (c *Client) acceptRequests() {
 
 		// Handle remaining messages and pass it to user system.
 		if rem != nil {
-			if err := c.system.Serve(byteutils.JoinMessages(rem...), &tx); err != nil {
+			if err := c.system.Serve(rem, &tx); err != nil {
 				c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
 				go c.Close()
 				return

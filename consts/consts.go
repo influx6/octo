@@ -80,9 +80,13 @@ var (
 
 	ErrNoServerFound = errors.New("Available server not found")
 
+	ErrNoSystemProvided = errors.New("No system provided for processing or authentication credentials")
+
 	ErrParseError = errors.New("Parser failed to parse")
 
 	ErrNoAuthorizationHeader = errors.New("Has no 'Authorization' header for authentication")
+
+	ErrInvalidCredentialDetail = errors.New("System provides invalid credentials")
 
 	ErrInvalidAuthentication = errors.New("Server invalidated authentication credentials")
 

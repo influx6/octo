@@ -2,8 +2,12 @@ package chttp
 
 import (
 	"bytes"
+	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/clients/goclient"
@@ -12,7 +16,7 @@ import (
 	"github.com/influx6/octo/utils"
 )
 
-// Attr defines a struct which holds configuration options for the websocket
+// Attr defines a struct which holds configuration options for the http
 // client.
 type Attr struct {
 	MaxReconnets int
@@ -23,8 +27,8 @@ type Attr struct {
 	Headers      map[string]string
 }
 
-// HTTPPod defines a websocket implementation which connects
-// to a provided websocket endpoint for making requests.
+// HTTPPod defines a http implementation which connects
+// to a provided http endpoint for making requests.
 type HTTPPod struct {
 	attr        Attr
 	instruments octo.Instrumentation
@@ -40,7 +44,7 @@ type HTTPPod struct {
 	started     bool
 }
 
-// New returns a new instance of the websocket pod.
+// New returns a new instance of the http pod.
 func New(insts octo.Instrumentation, attr Attr) (*HTTPPod, error) {
 	if attr.MaxDrops <= 0 {
 		attr.MaxDrops = consts.MaxTotalConnectionFailure
@@ -67,6 +71,7 @@ func New(insts octo.Instrumentation, attr Attr) (*HTTPPod, error) {
 func (w *HTTPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) error {
 	w.cnl.Lock()
 	if w.started {
+		w.cnl.Unlock()
 		return nil
 	}
 	w.cnl.Unlock()
@@ -81,13 +86,15 @@ func (w *HTTPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) 
 	return nil
 }
 
-// Close closes the websocket connection.
+// Close closes the http connection.
 func (w *HTTPPod) Close() error {
-	if w.isClose() {
+	if w.isClosed() {
 		return consts.ErrClosedConnection
 	}
 
 	w.notify(octo.ClosedHandler, nil)
+
+	w.bm.Reset()
 
 	w.cnl.Lock()
 	w.doClose = true
@@ -113,8 +120,13 @@ func (w *HTTPPod) notify(n octo.StateHandlerType, err error) {
 	w.pub.Notify(n, cm, err)
 }
 
-// Send delivers the giving message to the underline websocket connection.
-func (w *HTTPPod) Send(data interface{}, flush bool) error {
+// Send delivers the giving message to the underline http connection.
+// HTTP does not supported buffering, hence buffer if required must be done by the
+// user and then passed in. The flush bool is not functional.
+func (w *HTTPPod) Send(data interface{}, _ bool) error {
+	if !w.isStarted() {
+		return consts.ErrRequestUnsearvable
+	}
 
 	// Encode outside of lock to reduce contention.
 	dataBytes, err := w.encoding.Encode(data)
@@ -122,16 +134,61 @@ func (w *HTTPPod) Send(data interface{}, flush bool) error {
 		return err
 	}
 
+	return w.do(bytes.NewBuffer(dataBytes))
+}
+
+func (w *HTTPPod) do(bu *bytes.Buffer) error {
+	var url string
+
 	w.cnl.Lock()
-	if w.curAddr != nil && !w.curAddr.connected && !w.curAddr.reconnecting {
-		w.cnl.Unlock()
-		w.bm.Write(dataBytes)
-		return nil
-	}
+	url = w.curAddr.addr
 	w.cnl.Unlock()
 
-	_ = dataBytes
-	return nil
+	// We will attempt to make the request and deliver it, if successfully, we will
+	// clear the buffer if not then we must not attempt to clear it.
+	req, err := http.NewRequest("POST", url, bu)
+	if err != nil {
+		return err
+	}
+
+	for key, val := range w.attr.Headers {
+		req.Header.Set(key, val)
+	}
+
+	cred := w.system.Credential()
+	req.Header.Set("Authorization", fmt.Sprintf("%s %s:%s:%s", cred.Scheme, cred.Key, cred.Token, string(cred.Data)))
+
+	var client http.Client
+	client.Transport = &http.Transport{MaxIdleConnsPerHost: 5}
+	client.Timeout = 20 * time.Second
+
+	res, err := client.Do(req)
+	if err != nil {
+		// We must attempt to resent the data over and over until we find a server that
+		// can handle it or all servers have become unreachable.
+
+		if findErr := w.getNextServer(); findErr == nil {
+			return w.do(bu)
+		}
+
+		return err
+	}
+
+	// Read response body if not empty deliver to system else ignore.
+	var response bytes.Buffer
+	io.Copy(&response, res.Body)
+	res.Body.Close()
+
+	if response.Len() == 0 {
+		return nil
+	}
+
+	val, err := w.encoding.Decode(response.Bytes())
+	if err != nil {
+		return err
+	}
+
+	return w.system.Serve(val, w)
 }
 
 // srvAddr defines a struct for storing addr details.
@@ -235,13 +292,41 @@ func (w *HTTPPod) getNextServer() error {
 	return nil
 }
 
+// isStarted returns true/false if the giving http handler has started and has
+// provided the system and encoder for the httppod.
+func (w *HTTPPod) isStarted() bool {
+	w.cnl.Lock()
+	if w.started {
+		w.cnl.Unlock()
+		return true
+	}
+	w.cnl.Unlock()
+
+	return false
+}
+
+// isClosed returns true/false if the connection is closed or expected to be closed.
+func (w *HTTPPod) isClosed() bool {
+	w.cnl.Lock()
+	if w.doClose {
+		w.cnl.Unlock()
+		return true
+	}
+	w.cnl.Unlock()
+
+	return false
+}
+
 // reconnect attempts to retrieve a new server after a failure to connect and then
 // begins message passing.
 func (w *HTTPPod) reconnect() error {
-	if w.attr.Authenticate && w.attr.Headers != nil {
-		if _, ok := w.attr.Headers["Authorization"]; !ok {
-			return consts.ErrNoAuthorizationHeader
-		}
+	if w.system == nil {
+		return consts.ErrNoSystemProvided
+	}
+
+	cred := w.system.Credential()
+	if w.attr.Authenticate && cred.Scheme == "" {
+		return consts.ErrInvalidCredentialDetail
 	}
 
 	var started bool
@@ -275,30 +360,4 @@ func (w *HTTPPod) reconnect() error {
 	w.notify(octo.ConnectHandler, nil)
 
 	return nil
-}
-
-// shouldClose returns true/false if the giving connection should close.
-func (w *HTTPPod) shouldClose() bool {
-	w.cnl.Lock()
-	if w.doClose {
-		w.cnl.Unlock()
-		return true
-	}
-	w.cnl.Unlock()
-
-	return false
-}
-
-// isClose returns true/false if the connection is already closed.
-func (w *HTTPPod) isClose() bool {
-	w.cnl.Lock()
-	{
-		if !w.started {
-			w.cnl.Unlock()
-			return true
-		}
-	}
-	w.cnl.Unlock()
-
-	return false
 }

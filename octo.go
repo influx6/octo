@@ -59,6 +59,7 @@ func (c Command) String() string {
 // Parser defines a interface which exposes a method to parse a provided input
 // returning a giving value(interface type) or an error.
 type Parser interface {
+	Unparse(interface{}) ([]byte, error)
 	Parse([]byte) ([]Command, error)
 }
 

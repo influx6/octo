@@ -68,7 +68,7 @@ func (b *BaseSystem) Add(tag string, handle Handler) {
 }
 
 // ServeBase handles message received and returns messages slice it can not handle.
-func (b *BaseSystem) ServeBase(data []byte, tx Stream) ([]octo.Command, error) {
+func (b *BaseSystem) ServeBase(data []byte, tx Stream) ([]byte, error) {
 	b.log.Log(octo.LOGINFO, "goclient.BaseSystem", "ServeBase", "Started : %+q", data)
 
 	messages, err := b.parser.Parse(data)
@@ -95,8 +95,21 @@ func (b *BaseSystem) ServeBase(data []byte, tx Stream) ([]octo.Command, error) {
 
 	b.log.Log(octo.LOGINFO, "goclient.BaseSystem", "ServeBase", "Unserved : %+s", unserved)
 
+	if unserved == nil {
+		b.log.Log(octo.LOGINFO, "goclient.BaseSystem", "ServeBase", "Completed")
+		return nil, nil
+	}
+
+	pdata, err := b.parser.Unparse(unserved)
+	if err != nil {
+		b.log.Log(octo.LOGERROR, "goclient.BaseSystem", "ServeBase", "Completed : Unable to unparse remainder")
+		return nil, err
+	}
+
+	b.log.Log(octo.LOGINFO, "goclient.BaseSystem", "ServeBase", "Unparsed : %+s", pdata)
+
 	b.log.Log(octo.LOGINFO, "goclient.BaseSystem", "ServeBase", "Completed")
-	return unserved, nil
+	return pdata, err
 }
 
 // Serve handles message requests recieved and retuns an error on a message it cant

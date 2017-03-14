@@ -372,7 +372,7 @@ func (c *Client) handleRequest(data []byte, tx transmission.Stream) error {
 	}
 
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Completed")
-	return c.system.Serve(byteutils.JoinMessages(unserved...), tx)
+	return c.system.Serve(unserved, tx)
 }
 
 // initClusterNegotiation initiates the negotiation of cluster information.

@@ -15,7 +15,6 @@ import (
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
-	"github.com/influx6/octo/parsers/byteutils"
 	"github.com/influx6/octo/parsers/jsonparser"
 	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/systems/jsonsystem"
@@ -242,7 +241,7 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rem, err := s.primary.ServeBase(data.Bytes(), &basic)
 	if err != nil {
-		s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.acceptRequests", "BasicServer System : Fails Parsing : Error : %+s", err)
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.acceptRequests", "BasicServer System : Fails Parsing : Error : %+s : Switching to User System", err)
 
 		if err := s.system.Serve(data.Bytes(), &basic); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -255,9 +254,9 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Handle remaining messages and pass it to user system.
 	if rem != nil {
-		if err := s.system.Serve(byteutils.JoinMessages(rem...), &basic); err != nil {
+		if err := s.system.Serve(rem, &basic); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "BasicServer System : Fails Parsing : Error : %+s", err)
+			s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "BasicServer System : Fails Secondary Parsing : %+q : Error : %+s", rem, err)
 		}
 	}
 
@@ -327,7 +326,10 @@ func (t *BasicTransmission) SendAll(data []byte, flush bool) error {
 // Send pipes the giving data down the provided pipeline.
 func (t *BasicTransmission) Send(data []byte, flush bool) error {
 	t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Send", "Started")
+
+	t.instruments.Log(octo.LOGTRANSMISSION, t.info.UUID, "httpbasic.BasicTransmission.Send", "Started : %+q", data)
 	t.buffer.Write(data)
+	t.instruments.Log(octo.LOGTRANSMISSION, t.info.UUID, "httpbasic.BasicTransmission.Send", "Completed")
 
 	if !flush {
 		t.instruments.Log(octo.LOGINFO, t.info.UUID, "httpbasic.BasicTransmission.Send", "Completed")
