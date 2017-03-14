@@ -8,11 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
-	"github.com/influx6/octo/tests"
 	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/httpbasic"
 	"github.com/influx6/octo/utils"
@@ -130,7 +130,7 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 func newBasicServeHTTP(t *testing.T, authenticate bool, cred octo.Credentials, system transmission.System) *httpbasic.BasicServeHTTP {
 	return httpbasic.NewBasicServeHTTP(
 		authenticate,
-		instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)}),
+		instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()}),
 		utils.NewContact(":6070"),
 		cred,
 		system,

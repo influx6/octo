@@ -79,7 +79,7 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 // TestServer tests the validity of our server code.
 func TestServer(t *testing.T) {
 	system := mockSystem{t: t}
-	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)})
+	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()})
 
 	server := tcp.New(inst, tcp.ServerAttr{
 		Addr: ":6050",
@@ -166,7 +166,7 @@ func TestServer(t *testing.T) {
 // relating between clusters with authentication.
 func TestClusterServers(t *testing.T) {
 	system := mockSystem{t: t}
-	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)})
+	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()})
 
 	server := tcp.New(inst, tcp.ServerAttr{
 		Addr:         ":6050",
@@ -209,6 +209,11 @@ func TestClusterServers(t *testing.T) {
 	}
 	tests.Passed("Should have successfully connected server2 with server1 cluster.")
 
+	if len(clusters) == 0 {
+		tests.Failed("Should have successfully connected to another cluster.")
+	}
+	tests.Passed("Should have successfully connected to another cluster.")
+
 	if clusters[0].UUID != server.CLContact().UUID {
 		t.Logf("\t\t Received: %#v", clusters[0])
 		t.Logf("\t\t Expected: %#v", server.CLContact())
@@ -220,7 +225,7 @@ func TestClusterServers(t *testing.T) {
 // TestClusterServerSendAll tests the validity of our server code.
 func TestClusterServerSendAll(t *testing.T) {
 	system := mockSystem{t: t}
-	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger(t)})
+	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()})
 
 	server := tcp.New(inst, tcp.ServerAttr{
 		Addr:        ":6050",

@@ -23,16 +23,11 @@ func TestClientConnectionWithBadServers(t *testing.T) {
 
 	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()})
 
-	client, err := tcpclient.New(inst, tcpclient.Attr{
+	client := tcpclient.New(inst, tcpclient.Attr{
 		Addr: ":7040",
 	})
 
-	if err != nil {
-		tests.Failed("Should have successfully created clinet.")
-	}
-	tests.Passed("Should have successfully created clinet.")
-
-	err = client.Listen(clientSystem, mock.CommandEncoding{})
+	err := client.Listen(clientSystem, mock.CommandEncoding{})
 	if err == nil {
 		tests.Failed("Should have successfully failed to connect to tcp server.")
 	}
@@ -49,17 +44,11 @@ func TestClientConnectionWithNoServers(t *testing.T) {
 
 	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()})
 
-	client, err := tcpclient.New(inst, tcpclient.Attr{
+	client := tcpclient.New(inst, tcpclient.Attr{
 		Addr: "",
 	})
 
-	if err == nil {
-		tests.Failed("Should have successfully failed to connect to tcp server.")
-	}
-	tests.Passed("Should have successfully failed to connect to tcp server.")
-
-	err = client.Listen(clientSystem, mock.CommandEncoding{})
-	if err == nil {
+	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err == nil {
 		tests.Failed("Should have successfully failed to connect to tcp server.")
 	}
 	tests.Passed("Should have successfully failed to connect to tcp server.")
@@ -93,21 +82,16 @@ func TestClientConnectionWithoutAuth(t *testing.T) {
 	}
 	tests.Passed("Should have successfully created conenction for tcp server.")
 
-	if err := server.Listen(system); err == nil {
+	if err := server.Listen(system); err != nil {
 		tests.Failed("Should have successfully  failed to recall listen for tcp server.")
 	}
 	tests.Passed("Should have successfully  failed to recall listen for tcp server.")
 
 	defer server.Close()
 
-	client, err := tcpclient.New(inst, tcpclient.Attr{
+	client := tcpclient.New(inst, tcpclient.Attr{
 		Addr: ":6050",
 	})
-
-	if err != nil {
-		tests.Failed("Should have successfully connected to tcp server: %+q.", err)
-	}
-	tests.Passed("Should have successfully connected to tcp server.")
 
 	defer client.Close()
 
@@ -149,15 +133,10 @@ func TestClientConnectionWithAuth(t *testing.T) {
 
 	defer server.Close()
 
-	client, err := tcpclient.New(inst, tcpclient.Attr{
+	client := tcpclient.New(inst, tcpclient.Attr{
 		Addr:         ":7050",
 		Authenticate: true,
 	})
-
-	if err != nil {
-		tests.Failed("Should have successfully connected to tcp server: %+q.", err)
-	}
-	tests.Passed("Should have successfully connected to tcp server.")
 
 	defer client.Close()
 

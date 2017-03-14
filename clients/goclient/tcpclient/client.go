@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"net"
 	"net/url"
 	"sync"
@@ -51,7 +50,7 @@ type TCPPod struct {
 }
 
 // New returns a new instance of the TCP pod.
-func New(insts octo.Instrumentation, attr Attr) (*TCPPod, error) {
+func New(insts octo.Instrumentation, attr Attr) *TCPPod {
 	if attr.MaxDrops <= 0 {
 		attr.MaxDrops = consts.MaxTotalConnectionFailure
 	}
@@ -68,7 +67,7 @@ func New(insts octo.Instrumentation, attr Attr) (*TCPPod, error) {
 	// Prepare all server registering and validate paths.
 	pod.prepareServers()
 
-	return &pod, nil
+	return &pod
 }
 
 // Listen calls the connection to be create and begins serving requests.
@@ -229,9 +228,6 @@ func (w *TCPPod) getNextServer() error {
 		if srv == nil {
 			continue
 		}
-
-		fmt.Printf("W: %q -> %d - %d\n", srv.addr, w.attr.MaxDrops, w.attr.MaxReconnets)
-		fmt.Printf("S: %q -> %d - %d\n", srv.addr, srv.drops, srv.recons)
 
 		// If the MaxTotalConnectionFailure is reached, nil this server has bad.
 		if w.attr.MaxDrops > 0 && srv.drops >= w.attr.MaxDrops {

@@ -227,7 +227,7 @@ func TestClientConnectionWithoutAuth(t *testing.T) {
 
 	defer client.Close()
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err == nil {
+	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err != nil {
 		tests.Failed("Should have successfully failed to connect to udp server with client: %+q.", err)
 	}
 	tests.Passed("Should have successfully failed to connect to udp server with client.")

@@ -111,9 +111,9 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 	return tx.Send(response, true)
 }
 
-// TestHTTPBaiscProtocol validates the http basic protocol for the
+// TestHTTPWeaveProtocol validates the http basic protocol for the
 // octo package.
-func TestHTTPBaiscProtocol(t *testing.T) {
+func TestHTTPWeaveProtocol(t *testing.T) {
 	system := &mockSystem{t: t}
 	pocket := mock.NewCredentialPocket(octo.AuthCredential{})
 	inst := instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()})
@@ -135,7 +135,7 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 
 		req, err := newMessageRequest(header, byteutils.MakeByteMessage(consts.ContactRequest))
 		if err != nil {
-			tests.Failed("Should have successfully created request for command %q", "info")
+			tests.Failed("Should have successfully created request for command %q", "Info")
 		}
 		tests.Passed("Should have successfully created request for command %q", "info")
 
@@ -144,6 +144,7 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 
 		var tcpResponse octo.TCPResponse
 		if err := json.NewDecoder(recorder.Body).Decode(&tcpResponse); err != nil {
+			t.Logf("\t\tReceived: %+q", recorder.Body.Bytes())
 			tests.Failed("Should have successfully parsed tcp response from http server for %q: %q", "info", err.Error())
 		}
 		tests.Passed("Should have successfully parsed tcp response from http server for %q.", "info")
