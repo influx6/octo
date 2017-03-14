@@ -15,8 +15,8 @@ const (
 // contains a giving set of constants for usage in other packages.
 const (
 	KeepAlivePeriod           = 5 * time.Minute
-	ReadTimeout               = 5 * time.Second
-	WriteTimeout              = 5 * time.Second
+	ReadTimeout               = 10 * time.Second
+	WriteTimeout              = 10 * time.Second
 	ReadTempTimeout           = 3 * time.Second
 	WriteTempTimeout          = 4 * time.Second
 	MinTempSleep              = 10 * time.Millisecond

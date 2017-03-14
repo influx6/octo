@@ -87,8 +87,8 @@ type Client struct {
 	system                transmission.System
 	primarySystem         *transmission.BaseSystem
 	server                *Server
-	sendg                 sync.WaitGroup
 	wg                    sync.WaitGroup
+	sg                    sync.WaitGroup
 	buffer                bytes.Buffer
 	authCredentials       octo.AuthCredential
 	cl                    sync.Mutex
@@ -98,7 +98,6 @@ type Client struct {
 	stopAcceptingRequests bool
 	pl                    sync.Mutex
 	writer                *bufio.Writer
-	pending               sync.WaitGroup
 	conn                  net.Conn
 }
 
@@ -126,22 +125,19 @@ func (c *Client) Close() error {
 	}
 
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Close", "Waiting for all sent requests to End")
-	c.sendg.Wait()
 
 	c.cl.Lock()
 	c.running = false
 	c.doClose = true
 	c.cl.Unlock()
 
-	// c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Close", "Waiting for all pending requests to End")
-	// c.pending.Wait()
-	//
-	// c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Close", "Waiting for all acceptRequests to End")
-	// c.wg.Wait()
+	c.sg.Wait()
 
 	if err := c.conn.Close(); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Close", "Completed : %s", err)
 	}
+
+	c.wg.Wait()
 
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Close", "Completed")
 	return nil
@@ -223,9 +219,6 @@ func (c *Client) Listen() error {
 		c.running = true
 	}
 	c.cl.Unlock()
-
-	c.pending.Add(1)
-	defer c.pending.Done()
 
 	// If we are a clusterClient then attempt to exchange information with new cluster.
 	if c.clusterClient {
@@ -319,6 +312,11 @@ func (c *Client) acceptRequests() {
 			break
 		}
 
+		if c.shouldClose() {
+			block = nil
+			continue
+		}
+
 		c.conn.SetReadDeadline(time.Time{})
 		c.conn.SetWriteDeadline(time.Time{})
 
@@ -348,6 +346,9 @@ func (c *Client) acceptRequests() {
 // connection.
 func (c *Client) handleRequest(data []byte, tx transmission.Stream) error {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Started")
+
+	c.sg.Add(1)
+	defer c.sg.Done()
 
 	if c.primarySystem == nil {
 		c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Completed")
@@ -908,6 +909,7 @@ type Server struct {
 	clustersContact  []octo.Contact
 	rl               sync.RWMutex
 	running          bool
+	doClose          bool
 }
 
 // New returns a new Server which handles connections from clients and
@@ -979,6 +981,13 @@ func (s *Server) IsRunning() bool {
 	return s.running
 }
 
+// IsRunning returns true/false if the giving server is running.
+func (s *Server) shouldClose() bool {
+	s.rl.RLock()
+	defer s.rl.RUnlock()
+	return s.doClose
+}
+
 // Close returns the error from closing the listener.
 func (s *Server) Close() error {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Close", "Started : %#v", s.info)
@@ -988,20 +997,8 @@ func (s *Server) Close() error {
 	}
 
 	s.rl.Lock()
-	s.running = false
+	s.doClose = false
 	s.rl.Unlock()
-
-	if err := s.listener.Close(); err != nil {
-		s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.Close", "Completed : Client Close Error : %+s", err)
-	}
-
-	if s.clusterListener != nil {
-		if err := s.clusterListener.Close(); err != nil {
-			s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.Close", "Completed : Cluster Close Error : %+s", err)
-		}
-	}
-
-	s.wg.Wait()
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Close", "Init : Close Clients")
 	s.clientLock.Lock()
@@ -1024,6 +1021,22 @@ func (s *Server) Close() error {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Close", "Finished : Close Clusters")
 
 	s.cg.Wait()
+
+	s.rl.Lock()
+	s.running = false
+	s.rl.Unlock()
+
+	if err := s.listener.Close(); err != nil {
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.Close", "Completed : Client Close Error : %+s", err)
+	}
+
+	if s.clusterListener != nil {
+		if err := s.clusterListener.Close(); err != nil {
+			s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.Close", "Completed : Cluster Close Error : %+s", err)
+		}
+	}
+
+	s.wg.Wait()
 
 	return nil
 }
@@ -1058,6 +1071,7 @@ func (s *Server) Listen(system transmission.System) error {
 
 	s.rl.Lock()
 	s.running = true
+	s.doClose = false
 	s.rl.Unlock()
 
 	s.clientSystem = system
@@ -1145,8 +1159,10 @@ func (s *Server) RelateWithCluster(addr string) error {
 
 	s.generateClusterContact()
 
+	s.cg.Add(1)
 	go func() {
 		client.Wait()
+		s.cg.Done()
 
 		s.clusterLock.Lock()
 		{
@@ -1342,6 +1358,13 @@ func (s *Server) handleClientConnections(system transmission.System) {
 			}
 		}
 
+		// Close all connections coming in now, since we want to stop
+		// running.
+		if s.shouldClose() {
+			conn.Close()
+			continue
+		}
+
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
 			tcpConn.SetKeepAlive(true)
 			tcpConn.SetKeepAlivePeriod(consts.KeepAlivePeriod)
@@ -1446,6 +1469,13 @@ func (s *Server) handleClusterConnections(system transmission.System) {
 
 				continue
 			}
+		}
+
+		// Close all connections coming in now, since we want to stop
+		// running.
+		if s.shouldClose() {
+			conn.Close()
+			continue
 		}
 
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
