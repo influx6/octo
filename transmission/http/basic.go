@@ -1,6 +1,6 @@
-// Package httpbasic provides a server which implements server push system provided
+// Package http provides a server which implements server push system provided
 // by the new go http package.
-package httpbasic
+package http
 
 import (
 	"bytes"
@@ -22,21 +22,20 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
-// PushAttr defines a attribute struct for defining options for the WebBasicServer
+// BasicAttr defines a attribute struct for defining options for the WebBasicServer
 // struct.
-type PushAttr struct {
-	Addr          string
-	Authenticate  bool
-	Headers       http.Header
-	Credential    octo.AuthCredential
-	TLSConfig     *tls.Config
-	Notifications chan []byte
+type BasicAttr struct {
+	Addr         string
+	Authenticate bool
+	Headers      http.Header
+	Credential   octo.AuthCredential
+	TLSConfig    *tls.Config
 }
 
 // BasicServer defines a struct implements the http.ServeHTTP interface which
 // handles servicing http requests for websockets.
 type BasicServer struct {
-	Attr        PushAttr
+	Attr        BasicAttr
 	instruments octo.Instrumentation
 	info        octo.Contact
 	server      *http.Server
@@ -49,7 +48,7 @@ type BasicServer struct {
 }
 
 // New returns a new instance of a BasicServer.
-func New(instruments octo.Instrumentation, attr PushAttr) *BasicServer {
+func New(instruments octo.Instrumentation, attr BasicAttr) *BasicServer {
 	ip, port, _ := net.SplitHostPort(attr.Addr)
 	if ip == "" || ip == consts.AnyIP {
 		if realIP, err := netutils.GetMainIP(); err == nil {
@@ -60,6 +59,8 @@ func New(instruments octo.Instrumentation, attr PushAttr) *BasicServer {
 	var suuid = uuid.NewV4().String()
 
 	var ws BasicServer
+	ws.Attr = attr
+	ws.instruments = instruments
 	ws.info = octo.Contact{
 		SUUID:  suuid,
 		UUID:   suuid,

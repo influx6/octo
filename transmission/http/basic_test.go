@@ -1,4 +1,4 @@
-package httpbasic_test
+package http_test
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/transmission"
-	"github.com/influx6/octo/transmission/httpbasic"
+	httpbasic "github.com/influx6/octo/transmission/http"
 	"github.com/influx6/octo/utils"
 )
 

@@ -16,6 +16,21 @@ func NewLogger() *Logger {
 
 // Log exposes methods to giving logger to the internal testing.T object.
 func (l *Logger) Log(level string, namespace string, function string, message string, items ...interface{}) {
+	log.Output(2, fmt.Sprintf("%s : %s : %s : %s\n", level, namespace, function, fmt.Sprintf(message, items...)))
+}
+
+//================================================================================
+
+// TestLogger defines a structure that implements the octo.Log interface.
+type TestLogger struct{}
+
+// NewTestLogger returns a new instance of a Logger.
+func NewTestLogger() *Logger {
+	return &Logger{}
+}
+
+// Log exposes methods to giving logger to the internal testing.T object.
+func (l *TestLogger) Log(level string, namespace string, function string, message string, items ...interface{}) {
 	if testing.Verbose() {
 		log.Output(2, fmt.Sprintf("%s : %s : %s : %s\n", level, namespace, function, fmt.Sprintf(message, items...)))
 	}
