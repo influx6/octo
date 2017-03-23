@@ -51,6 +51,7 @@ var (
 // Each has it's request and response version.
 var (
 	CTRLLine              = []byte(CTRL)
+	Empty                 = []byte("")
 	PING                  = []byte("PING")
 	PONG                  = []byte("PONG")
 	ClientContactRequest  = []byte("CLINFO")

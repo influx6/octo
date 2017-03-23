@@ -308,11 +308,6 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Remote: r.RemoteAddr,
 	}
 
-	if err := client.authorizationByHeader(); err != nil {
-		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
-		return
-	}
-
 	conn, err := s.upgrader.Upgrade(w, r, s.Attr.Headers)
 	if err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
@@ -320,6 +315,12 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client.Conn = conn
+
+	if err := client.authenticate(); err != nil {
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
+		conn.Close()
+		return
+	}
 
 	if err := client.Listen(); err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
@@ -343,26 +344,46 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // each request client.
 type Client struct {
 	*websocket.Conn
-	Request     *http.Request
-	instruments octo.Instrumentation
-	info        octo.Contact
-	system      transmission.System
-	primary     *transmission.BaseSystem
-	wg          sync.WaitGroup
-	sg          sync.WaitGroup
-	server      *BaseSocketServer
-	cl          sync.Mutex
-	index       int
-	running     bool
-	doClose     bool
+	Request       *http.Request
+	instruments   octo.Instrumentation
+	info          octo.Contact
+	system        transmission.System
+	primary       *transmission.BaseSystem
+	wg            sync.WaitGroup
+	sg            sync.WaitGroup
+	server        *BaseSocketServer
+	cl            sync.Mutex
+	index         int
+	running       bool
+	doClose       bool
+	authenticated bool
 }
 
 // authenticate runs the authentication procedure to authenticate that the connection
 // was valid.
-func (c *Client) authorizationByRequest() error {
+func (c *Client) authenticate() error {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Started")
+
 	if !c.server.Attr.Authenticate {
 		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
+		return nil
+	}
+
+	// fmt.Printf("Auth: %+q\n", c.Request.Header.Get("Authorization"))
+	if len(c.Request.Header.Get("Authorization")) == 0 {
+		return c.authorizationByRequest()
+	}
+
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
+	return c.authorizationByHeader()
+}
+
+// authenticateByRequest attempts to authenticate through the first message sent on
+// the websocket connection.
+func (c *Client) authorizationByRequest() error {
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticateByRequest", "Started")
+	if !c.server.Attr.Authenticate {
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed")
 		return nil
 	}
 
@@ -371,47 +392,97 @@ func (c *Client) authorizationByRequest() error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(cmd); err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Error : %q", err.Error())
 		return nil
 	}
 
 	if err := c.Send(buf.Bytes(), true); err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Error : %q", err.Error())
 		return nil
 	}
 
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
+	{
+		var authResponse octo.Command
+
+		messageType, message, err := c.Conn.ReadMessage()
+		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.authenticateByRequest", "Type: %d, Message: %+q", messageType, message)
+		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed")
+
+		if err != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
+			return err
+		}
+
+		if err := json.NewDecoder(bytes.NewBuffer(message)).Decode(&authResponse); err != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
+			return err
+		}
+
+		if !bytes.Equal(authResponse.Name, consts.AuthResponse) {
+			err := errors.New("Invalid Request received")
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
+			return err
+		}
+
+		var credential octo.AuthCredential
+
+		if merr := json.NewDecoder(bytes.NewBuffer(bytes.Join(authResponse.Data, consts.Empty))).Decode(&credential); merr != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", merr.Error())
+			return merr
+		}
+
+		if merr := c.system.Authenticate(credential); merr != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", merr.Error())
+			return merr
+		}
+
+		cmd, _, cerr := utils.NewCommandByte(consts.OK)
+		if cerr != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", cerr.Error())
+			return cerr
+		}
+
+		if merr := c.Send(cmd, true); merr != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", merr.Error())
+			return merr
+		}
+
+		c.authenticated = true
+	}
+
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed")
 	return nil
 }
 
 // authorizationByHeader runs the authentication procedure to authenticate the connection
 // by using the Authorization header present in the request object was valid.
 func (c *Client) authorizationByHeader() error {
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Started")
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticateByHeader", "Started")
 	if !c.server.Attr.Authenticate {
-		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticateByHeader", "Completed")
 		return nil
 	}
 
 	authorizationHeader := c.Request.Header.Get("Authorization")
 	if len(authorizationHeader) == 0 {
 		err := errors.New("'Authorization' header needed for authentication")
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByHeader", "Completed : Error : %+q", err)
 		return err
 	}
 
 	credentials, err := utils.ParseAuthorization(authorizationHeader)
 	if err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByHeader", "Completed : Error : %+q", err)
 		return err
 	}
 
 	if err := c.system.Authenticate(credentials); err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticate", "Completed : Error : %+q", err)
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByHeader", "Completed : Error : %+q", err)
 		return err
 	}
 
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticate", "Completed")
+	c.authenticated = true
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.authenticateByHeader", "Completed")
 	return nil
 }
 

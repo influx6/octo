@@ -65,7 +65,8 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 	}
 
 	switch {
-	// case bytes.Equal(consts.AuthRequest, command.Name):
+	case bytes.Equal([]byte("OK"), command.Name):
+		return nil
 	case bytes.Equal([]byte("PUMP"), command.Name):
 		return tx.Send([]byte("RUMP"), true)
 	case bytes.Equal([]byte("REX"), command.Name):
@@ -100,9 +101,9 @@ func TestWebsocketServer(t *testing.T) {
 			"X-App": "Octo-App",
 		})
 
-		if err == nil {
+		if err != nil {
 			conn.Close()
-			tests.Failed("Should have successfully failed to connect to websocket server without auhorization.")
+			tests.Failed("Should have successfully failed to connect to websocket server without auhorization: %+q", err)
 		}
 		tests.Passed("Should have successfully failed to connect to websocket server without auhorization.")
 	}
@@ -163,7 +164,13 @@ func TestWebsocketServer(t *testing.T) {
 // TestWebsocketSystem validates the behaviour of the websocket that it matches
 // the octo standards.
 func TestWebsocketSystem(t *testing.T) {
-	pocket := mock.NewCredentialPocket(octo.AuthCredential{})
+	pocket := mock.NewCredentialPocket(octo.AuthCredential{
+		Scheme: scheme,
+		Key:    key,
+		Token:  token,
+		Data:   tokenData,
+	})
+
 	system := &mockSystem{t: t}
 	ws := websocket.NewBaseSocketServer(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()}), websocket.BaseSocketAttr{
 		Authenticate: true,
@@ -181,11 +188,77 @@ func TestWebsocketSystem(t *testing.T) {
 			"X-App": "Octo-App",
 		})
 
-		if err == nil {
+		if err != nil {
 			conn.Close()
 			tests.Failed("Should have successfully failed to connect to websocket server without auhorization.")
 		}
 		tests.Passed("Should have successfully failed to connect to websocket server without auhorization.")
+	}
+
+	t.Logf("\tWhen we make a websocket request with Authorization sent as a message to %q", serverURL)
+	{
+
+		conn, _, err := newWebsocketClient("ws://"+serverURL, map[string]string{
+			"X-App": "Octo-App",
+		})
+
+		if err != nil {
+			conn.Close()
+			tests.Failed("Should have successfully connected to websocket server without auhorization: %+q.", err.Error())
+		}
+		tests.Passed("Should have successfully connected to websocket server without auhorization.")
+
+		mtype, mdata, merr := conn.ReadMessage()
+		if merr != nil {
+			conn.Close()
+			tests.Failed("Should have successfully received message from server: %+q.", merr.Error())
+		}
+		tests.Passed("Should have successfully received message from server: %+q -> %d.", mdata, mtype)
+
+		cmd, cerr := utils.ToCommand(mdata)
+		if cerr != nil {
+			conn.Close()
+			tests.Failed("Should have successfully received command type from server: %+q.", cerr.Error())
+		}
+		tests.Passed("Should have successfully received command type from server.")
+
+		if !bytes.Equal(cmd.Name, consts.AuthRequest) {
+			tests.Failed("Should have successfully received AUTH command request from server.")
+		}
+		tests.Passed("Should have successfully received AUTH command request from server.")
+
+		pocketData, _ := pocket.Bytes()
+		auth, _, aerr := utils.NewCommandByte(consts.AuthResponse, pocketData)
+		if aerr != nil {
+			tests.Failed("Should have successfully created AuthResponse for server.")
+		}
+		tests.Passed("Should have successfully created AuthResponse for server.")
+
+		if serr := conn.WriteMessage(gwebsocket.BinaryMessage, auth); serr != nil {
+			tests.Failed("Should have successfully received delivered AUTH response to server: %+q.", serr)
+		}
+		tests.Passed("Should have successfully received delivered AUTH response to server.")
+
+		mtype, mdata, merr = conn.ReadMessage()
+		if merr != nil {
+			conn.Close()
+			tests.Failed("Should have successfully received message from server: %+q.", merr.Error())
+		}
+		tests.Passed("Should have successfully received message from server: %+q -> %d.", mdata, mtype)
+
+		cmd, cerr = utils.ToCommand(mdata)
+		if cerr != nil {
+			conn.Close()
+			tests.Failed("Should have successfully received command type from server: %+q.", cerr.Error())
+		}
+		tests.Passed("Should have successfully received command type from server.")
+
+		if !bytes.Equal(cmd.Name, consts.OK) {
+			tests.Failed("Should have successfully passed AUTH process with server.")
+		}
+		tests.Passed("Should have successfully passsed AUTH process with server.")
+
+		conn.Close()
 	}
 
 	t.Logf("\tWhen we make a initial websocket request with Authorization header to %q", serverURL)
@@ -199,7 +272,7 @@ func TestWebsocketSystem(t *testing.T) {
 			tests.Failed("Should have successfully connected to websocket server with auhorization: %q", err.Error())
 		}
 
-		defer conn.Close()
+		conn.Close()
 
 		tests.Passed("Should have successfully connected to websocket server with auhorization")
 	}
