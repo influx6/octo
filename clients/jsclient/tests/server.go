@@ -1,9 +1,8 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +13,7 @@ import (
 	"github.com/influx6/octo/transmission"
 	"github.com/influx6/octo/transmission/http"
 	"github.com/influx6/octo/transmission/websocket"
+	"github.com/influx6/octo/utils"
 )
 
 var (
@@ -47,21 +47,31 @@ func (mockSystem) Authenticate(cred octo.AuthCredential) error {
 
 // Serve handles the processing of different requests coming from the outside.
 func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
-	var command octo.Command
+	fmt.Printf("Message: %+q\n", message)
 
-	if err := json.Unmarshal(message, &command); err != nil {
+	commands, err := utils.ToCommands(message)
+	if err != nil {
 		return err
 	}
 
-	switch {
-	// case bytes.Equal(consts.AuthRequest, command.Name):
-	case bytes.Equal([]byte("PUMP"), command.Name):
-		return tx.Send([]byte("RUMP"), true)
-	case bytes.Equal([]byte("REX"), command.Name):
-		return tx.Send([]byte("DEX"), true)
+	for _, command := range commands {
+		switch command.Name {
+		case "PUMP":
+			if err := tx.Send([]byte("RUMP"), true); err != nil {
+				return err
+			}
+
+			continue
+		case "REX":
+			if err := tx.Send([]byte("DEX"), true); err != nil {
+				return err
+			}
+		default:
+			return errors.New("Invalid Command")
+		}
 	}
 
-	return errors.New("Invalid Command")
+	return nil
 }
 
 func main() {

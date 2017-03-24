@@ -104,7 +104,7 @@ func (b blockParser) Parse(msg []byte) ([]octo.Command, error) {
 		}
 
 		messages = append(messages, octo.Command{
-			Name: command,
+			Name: string(command),
 			Data: data,
 		})
 	}

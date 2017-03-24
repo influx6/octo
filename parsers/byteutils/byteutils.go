@@ -84,7 +84,7 @@ func JoinMessages(mgs ...octo.Command) []byte {
 	var bm [][]byte
 
 	for _, msg := range mgs {
-		bm = append(bm, WrapResponseBlock(msg.Name, msg.Data...))
+		bm = append(bm, WrapResponseBlock([]byte(msg.Name), msg.Data...))
 	}
 
 	return bytes.Join(bm, colonSlice)

@@ -45,7 +45,7 @@ func AuthHandlers(credential octo.Credentials, authenticator octo.Authenticator)
 				return err
 			}
 
-			return sendJSON(tx, octo.Command{Name: consts.AuthResponse, Data: [][]byte{parsed}}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.AuthResponse), Data: [][]byte{parsed}}, true)
 		},
 	}
 }
@@ -60,13 +60,13 @@ func BaseHandlers() goclient.HandlerMap {
 		"CLOSE": func(m octo.Command, tx goclient.Stream) error {
 			defer tx.Close()
 
-			return sendJSON(tx, octo.Command{Name: consts.OK}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.OK)}, true)
 		},
 		"PONG": func(m octo.Command, tx goclient.Stream) error {
-			return sendJSON(tx, octo.Command{Name: consts.PING}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.PING)}, true)
 		},
 		"PING": func(m octo.Command, tx goclient.Stream) error {
-			return sendJSON(tx, octo.Command{Name: consts.PONG}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.PONG)}, true)
 		},
 	}
 }

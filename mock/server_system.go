@@ -31,14 +31,14 @@ func (s *ServerSystem) Serve(message []byte, tx transmission.Stream) error {
 	}
 
 	for _, command := range cmds {
-		switch {
-		case bytes.Equal(consts.ContactRequest, command.Name):
+		switch command.Name {
+		case string(consts.ContactRequest):
 			return tx.Send([]byte("OK"), true)
-		case bytes.Equal([]byte("PUMP"), command.Name):
+		case "PUMP":
 			return tx.Send([]byte("RUMP"), true)
-		case bytes.Equal([]byte("REX"), command.Name):
+		case ("REX"):
 			return tx.Send([]byte("DEX"), true)
-		case bytes.Equal([]byte("BONG"), command.Name):
+		case "BONG":
 			return tx.Send([]byte("BING"), true)
 		default:
 			break
@@ -99,31 +99,31 @@ func (s *ServerCommandSystem) Serve(message []byte, tx transmission.Stream) erro
 	}
 
 	for _, command := range commands {
-		switch {
-		case bytes.Equal(consts.ContactRequest, command.Name):
-			cmdData, err := json.Marshal(octo.Command{Name: []byte("OK")})
+		switch command.Name {
+		case string(consts.ContactRequest):
+			cmdData, err := json.Marshal(octo.Command{Name: ("OK")})
 			if err != nil {
 				return err
 			}
 
 			return tx.Send(cmdData, true)
-		case bytes.Equal([]byte("PUMP"), command.Name):
-			cmdData, err := json.Marshal(octo.Command{Name: []byte("RUMP")})
+		case "PUMP":
+			cmdData, err := json.Marshal(octo.Command{Name: ("RUMP")})
 			if err != nil {
 				return err
 			}
 
 			return tx.Send(cmdData, true)
-		case bytes.Equal([]byte("REX"), command.Name):
-			cmdData, err := json.Marshal(octo.Command{Name: []byte("DEX")})
+		case "REX":
+			cmdData, err := json.Marshal(octo.Command{Name: ("DEX")})
 			if err != nil {
 				return err
 			}
 
 			return tx.Send(cmdData, true)
 
-		case bytes.Equal([]byte("BONG"), command.Name):
-			cmdData, err := json.Marshal(octo.Command{Name: []byte("BING")})
+		case "BONG":
+			cmdData, err := json.Marshal(octo.Command{Name: ("BING")})
 			if err != nil {
 				return err
 			}

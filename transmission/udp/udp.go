@@ -409,7 +409,7 @@ func (c *Client) authenticate(data []byte) error {
 		return nil
 	}
 
-	if !bytes.Equal(cmd.Name, consts.AuthResponse) {
+	if cmd.Name != string(consts.AuthResponse) {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.authenticate", "Completed : Error : Not Authorization Response : %q", consts.ErrAuthorizationFailed.Error())
 
 		if block, _, cerr := utils.NewCommandByte(consts.AuthroizationDenied, []byte(consts.ErrAuthorizationFailed.Error())); cerr == nil {

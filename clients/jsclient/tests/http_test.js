@@ -10,10 +10,6 @@ const http = new octo.HTTPClient(auth, attr, function(data, tx, res){
   console.log("Data:", data.toString())
 })
 
-http.Do(octo.Message({
-  name: "PUMP",
-}))
+http.Do(octo.BufferMessage([{"name": "REX", "data": null}]))
 
-http.Do(octo.Message({
-  name: "REX",
-}), console.log)
+http.Do(octo.BufferMessage([{"name": "PUMP", "data": null}]))

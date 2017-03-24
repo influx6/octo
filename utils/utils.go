@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/influx6/octo"
@@ -58,10 +59,29 @@ func ToCommand(data []byte) (octo.Command, error) {
 	return cmd, nil
 }
 
+// ToCommands returns a slice of commands parsed from the provide byte slice.
+func ToCommands(data []byte) ([]octo.Command, error) {
+	var commands []octo.Command
+
+	if err := json.Unmarshal(data, &commands); err != nil {
+		var single octo.Command
+
+		errx := json.Unmarshal(data, &single)
+		if errx == nil {
+			commands = append(commands, single)
+			return commands, nil
+		}
+
+		return nil, fmt.Errorf("Failed to parse: %q : %q", err.Error(), errx.Error())
+	}
+
+	return commands, nil
+}
+
 // NewCommand returns a new command object with the provided name and data.
 func NewCommand(name string, data ...string) octo.Command {
 	var cmd octo.Command
-	cmd.Name = []byte(name)
+	cmd.Name = name
 	cmd.Data = byteutils.StringsToBytes(data...)
 
 	return cmd
@@ -71,7 +91,7 @@ func NewCommand(name string, data ...string) octo.Command {
 // byte slice.
 func NewCommandMessage(name string, data ...string) ([]byte, octo.Command, error) {
 	var cmd octo.Command
-	cmd.Name = []byte(name)
+	cmd.Name = (name)
 	cmd.Data = byteutils.StringsToBytes(data...)
 
 	mdata, err := json.Marshal(cmd)
@@ -86,7 +106,7 @@ func NewCommandMessage(name string, data ...string) ([]byte, octo.Command, error
 // byte slice.
 func NewCommandByte(name []byte, data ...[]byte) ([]byte, octo.Command, error) {
 	var cmd octo.Command
-	cmd.Name = []byte(name)
+	cmd.Name = string(name)
 	cmd.Data = data
 
 	mdata, err := json.Marshal(cmd)

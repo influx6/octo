@@ -388,7 +388,7 @@ func (c *Client) authorizationByRequest() error {
 	}
 
 	var cmd octo.Command
-	cmd.Name = consts.AuthRequest
+	cmd.Name = string(consts.AuthRequest)
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(cmd); err != nil {
@@ -418,7 +418,7 @@ func (c *Client) authorizationByRequest() error {
 			return err
 		}
 
-		if !bytes.Equal(authResponse.Name, consts.AuthResponse) {
+		if authResponse.Name != string(consts.AuthResponse) {
 			err := errors.New("Invalid Request received")
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
 			return err

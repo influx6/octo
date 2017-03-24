@@ -45,7 +45,7 @@ func AuthHandlers(credential octo.Credentials, authenticator octo.Authenticator)
 				return err
 			}
 
-			return sendJSON(tx, octo.Command{Name: consts.AuthResponse, Data: [][]byte{parsed}}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.AuthResponse), Data: [][]byte{parsed}}, true)
 		},
 	}
 }
@@ -60,13 +60,13 @@ func BaseHandlers() transmission.HandlerMap {
 		"CLOSE": func(m octo.Command, tx transmission.Stream) error {
 			defer tx.Close()
 
-			return sendJSON(tx, octo.Command{Name: consts.OK}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.OK)}, true)
 		},
 		"PONG": func(m octo.Command, tx transmission.Stream) error {
-			return sendJSON(tx, octo.Command{Name: consts.PING}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.PING)}, true)
 		},
 		"PING": func(m octo.Command, tx transmission.Stream) error {
-			return sendJSON(tx, octo.Command{Name: consts.PONG}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.PONG)}, true)
 		},
 		string(consts.ClientContactRequest): func(m octo.Command, tx transmission.Stream) error {
 			clientContact, _ := tx.Contact()
@@ -76,7 +76,7 @@ func BaseHandlers() transmission.HandlerMap {
 				return err
 			}
 
-			return sendJSON(tx, octo.Command{Name: consts.ClientContactResponse, Data: [][]byte{infx}}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.ClientContactResponse), Data: [][]byte{infx}}, true)
 		},
 		string(consts.ContactRequest): func(m octo.Command, tx transmission.Stream) error {
 			_, serverContact := tx.Contact()
@@ -86,7 +86,7 @@ func BaseHandlers() transmission.HandlerMap {
 				return err
 			}
 
-			return sendJSON(tx, octo.Command{Name: consts.ContactResponse, Data: [][]byte{infx}}, true)
+			return sendJSON(tx, octo.Command{Name: string(consts.ContactResponse), Data: [][]byte{infx}}, true)
 		},
 	}
 }

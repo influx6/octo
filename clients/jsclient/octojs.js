@@ -6,6 +6,11 @@ const websocket = require("websocket-stream")
 
 // Message returns a Buffer version of the jsonified object.
 function Message(obj){
+	return JSON.stringify(obj)
+}
+
+// BufferMessage returns a Buffer version of the jsonified object.
+function BufferMessage(obj){
 	return new Buffer(JSON.stringify(obj))
 }
 
@@ -125,7 +130,7 @@ class HTTP extends Octo {
 			hostname: this.current.path.hostname,
 			headers: {
 				"Authorization": ParseAuthCredentialsAsHeader(this.credentials),
-				"Content-Type": "appication/command",
+				"Content-Type": "application/json",
 			},
 		}, function(res){
 			var incoming = []
@@ -185,8 +190,9 @@ class Websocket extends Octo {
 module.exports = {
 	Octo: Octo,
 	Attr: Attr,
-	Message: Message,
 	HTTPClient: HTTP,
+	Message: Message,
+	BufferMessage: BufferMessage,
 	WebsocketClient: Websocket,
 	AuthCredentials: AuthCredentials,
 	ParseAuthCredentialsAsHeader: ParseAuthCredentialsAsHeader,

@@ -202,13 +202,13 @@ func (b *BaseSystem) ServeBase(data []byte, tx Stream) ([]byte, error) {
 	var unserved []octo.Command
 
 	for _, message := range messages {
-		b.log.Log(octo.LOGINFO, "octo.BaseSystem", "Serve", "Serving Message : %+s", message)
+		b.log.Log(octo.LOGINFO, "octo.BaseSystem", "ServeBase", "Serving Message : %+s", message)
 
 		command := strings.ToLower(string(message.Name))
 		if handler, ok := b.handlers[command]; ok {
-			if err := handler(message, tx); err != nil {
-				b.log.Log(octo.LOGERROR, "octo.BaseSystem", "ServeBase", "ServeError : %+q", err.Error())
-				return nil, err
+			if herr := handler(message, tx); err != nil {
+				b.log.Log(octo.LOGERROR, "octo.BaseSystem", "ServeBase", "ServeError : %+q", herr.Error())
+				return nil, herr
 			}
 		} else {
 			unserved = append(unserved, message)

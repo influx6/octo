@@ -1,7 +1,6 @@
 package mock
 
 import (
-	"bytes"
 	"errors"
 	"sync"
 
@@ -40,8 +39,8 @@ func (c *ClientSystem) Serve(message interface{}, tx goclient.Stream) error {
 		return consts.ErrUnsupportedFormat
 	}
 
-	switch {
-	case bytes.Equal(consts.ContactRequest, command.Name):
+	switch command.Name {
+	case string(consts.ContactRequest):
 		defer c.wg.Done()
 		if err := tx.Send([]byte("OK"), true); err != nil {
 			return err

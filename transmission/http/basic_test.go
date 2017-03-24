@@ -53,21 +53,30 @@ func (mockSystem) Authenticate(cred octo.AuthCredential) error {
 
 // Serve handles the processing of different requests coming from the outside.
 func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
-	var command octo.Command
-
-	if err := json.Unmarshal(message, &command); err != nil {
+	commands, err := utils.ToCommands(message)
+	if err != nil {
 		return err
 	}
 
-	switch {
-	// case bytes.Equal(consts.AuthRequest, command.Name):
-	case bytes.Equal([]byte("PUMP"), command.Name):
-		return tx.Send([]byte("RUMP"), true)
-	case bytes.Equal([]byte("REX"), command.Name):
-		return tx.Send([]byte("DEX"), true)
+	for _, command := range commands {
+		switch command.Name {
+		case "PUMP":
+			if err := tx.Send([]byte("RUMP"), true); err != nil {
+				return err
+			}
+
+			continue
+		case "REX":
+			if err := tx.Send([]byte("DEX"), true); err != nil {
+				return err
+			}
+			continue
+		default:
+			return errors.New("Invalid Command")
+		}
 	}
 
-	return errors.New("Invalid Command")
+	return nil
 }
 
 // TestHTTPBaiscProtocol validates the http basic protocol for the
@@ -98,7 +107,7 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 		}
 		tests.Passed("Should have successfully parsed response for command %q", "info")
 
-		if !bytes.Equal(received.Name, consts.ContactResponse) {
+		if received.Name != string(consts.ContactResponse) {
 			tests.Failed("Should have successfully matched response command as %+q", consts.ContactResponse)
 		}
 		tests.Passed("Should have successfully matched response command as %+q", consts.ContactResponse)
@@ -125,6 +134,32 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 		tests.Passed("Should have successfully failed to make request command %+q", consts.ContactRequest)
 	}
 
+	t.Logf("\tWhen request %q command with authorization", "REX")
+	{
+		header := make(map[string]string)
+		header["X-App"] = "Octo-App"
+		header["Authorization"] = "XBot api-32:auth-4531:BOMTx"
+
+		req, err := newMessageRequest(header, string("REX"))
+		if err != nil {
+			tests.Failed("Should have successfully created request for command %q", consts.ContactRequest)
+		}
+		tests.Passed("Should have successfully created request for command %q", consts.ContactRequest)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusOK {
+			tests.Failed("Should have successfully failed to make request command %+q: %d", consts.ContactRequest, recorder.Code)
+		}
+		tests.Passed("Should have successfully failed to make request command %+q", consts.ContactRequest)
+
+		if !bytes.Equal(recorder.Body.Bytes(), []byte("DEX")) {
+			tests.Failed("Should have successfully received response %+q from server: %+q", "DEX", recorder.Body.Bytes())
+		}
+		tests.Passed("Should have successfully received response %+q from server: %+q", "DEX", recorder.Body.Bytes())
+	}
+
 }
 
 func newBasicServeHTTP(t *testing.T, authenticate bool, cred octo.Credentials, system transmission.System) *httpbasic.BasicServeHTTP {
@@ -147,7 +182,7 @@ func newMessageRequest(header map[string]string, command string, msgs ...string)
 
 	var body bytes.Buffer
 
-	if err := json.NewEncoder(&body).Encode(octo.Command{Name: []byte(command), Data: dataMessages}); err != nil {
+	if err := json.NewEncoder(&body).Encode(octo.Command{Name: command, Data: dataMessages}); err != nil {
 		return nil, err
 	}
 

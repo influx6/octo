@@ -47,7 +47,7 @@ type TCPTransformer interface {
 // Command defines a struct which holds the giving operation expected to be performed,
 // It provides the name and data of command expected.
 type Command struct {
-	Name []byte   `json:"name"`
+	Name string   `json:"name"`
 	Data [][]byte `json:"data"`
 }
 

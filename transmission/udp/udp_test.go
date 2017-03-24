@@ -61,11 +61,12 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 		return err
 	}
 
-	switch {
-	// case bytes.Equal(consts.AuthRequest, command.Name):
-	case bytes.Equal([]byte("PUMP"), command.Name):
+	switch command.Name {
+	case "OK":
+		return nil
+	case "PUMP":
 		return tx.Send([]byte("RUMP"), true)
-	case bytes.Equal([]byte("REX"), command.Name):
+	case "REX":
 		return tx.Send([]byte("DEX"), true)
 	}
 
@@ -118,7 +119,7 @@ func TestUDPServer(t *testing.T) {
 		}
 		tests.Passed("Should have successfully received command object as response.")
 
-		if !bytes.Equal(consts.AuthroizationDenied, commandResponse.Name) {
+		if !bytes.Equal(consts.AuthroizationDenied, []byte(commandResponse.Name)) {
 			tests.Failed("Should have successfully received AuthorizationDenied response without authorization.")
 		}
 		tests.Passed("Should have successfully received AuthorizationDenied response without authorization.")
@@ -163,7 +164,7 @@ func TestUDPServer(t *testing.T) {
 		}
 		tests.Passed("Should have successfully received command object as response.")
 
-		if !bytes.Equal(consts.AuthroizationGranted, commandResponse.Name) {
+		if !bytes.Equal(consts.AuthroizationGranted, []byte(commandResponse.Name)) {
 			tests.Failed("Should have successfully received AuthorizatioGranted response without authorization.")
 		}
 		tests.Passed("Should have successfully received AuthorizationGranted response without authorization.")
@@ -185,7 +186,7 @@ func TestUDPServer(t *testing.T) {
 		}
 		tests.Passed("Should have successfully received command object as response.")
 
-		if !bytes.Equal(consts.ContactResponse, commandResponse2.Name) {
+		if !bytes.Equal(consts.ContactResponse, []byte(commandResponse2.Name)) {
 			tests.Failed("Should have successfully received ContactResponse response without authorization.")
 		}
 		tests.Passed("Should have successfully received ContactRespone response without authorization.")

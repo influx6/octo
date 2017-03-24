@@ -64,12 +64,12 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 		return err
 	}
 
-	switch {
-	case bytes.Equal([]byte("OK"), command.Name):
+	switch command.Name {
+	case "OK":
 		return nil
-	case bytes.Equal([]byte("PUMP"), command.Name):
+	case "PUMP":
 		return tx.Send([]byte("RUMP"), true)
-	case bytes.Equal([]byte("REX"), command.Name):
+	case "REX":
 		return tx.Send([]byte("DEX"), true)
 	}
 
@@ -149,7 +149,7 @@ func TestWebsocketServer(t *testing.T) {
 		}
 		tests.Passed("Should have successfully connected to read messages.")
 
-		if !bytes.Equal(cmd.Name, consts.ContactResponse) {
+		if cmd.Name != string(consts.ContactResponse) {
 			tests.Failed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
 		}
 		tests.Passed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
@@ -222,7 +222,7 @@ func TestWebsocketSystem(t *testing.T) {
 		}
 		tests.Passed("Should have successfully received command type from server.")
 
-		if !bytes.Equal(cmd.Name, consts.AuthRequest) {
+		if !bytes.Equal([]byte(cmd.Name), consts.AuthRequest) {
 			tests.Failed("Should have successfully received AUTH command request from server.")
 		}
 		tests.Passed("Should have successfully received AUTH command request from server.")
@@ -253,7 +253,7 @@ func TestWebsocketSystem(t *testing.T) {
 		}
 		tests.Passed("Should have successfully received command type from server.")
 
-		if !bytes.Equal(cmd.Name, consts.OK) {
+		if !bytes.Equal([]byte(cmd.Name), consts.OK) {
 			tests.Failed("Should have successfully passed AUTH process with server.")
 		}
 		tests.Passed("Should have successfully passsed AUTH process with server.")
@@ -302,7 +302,7 @@ func TestWebsocketSystem(t *testing.T) {
 		}
 		tests.Passed("Should have successfully connected to read messages.")
 
-		if !bytes.Equal(cmd.Name, consts.ContactResponse) {
+		if !bytes.Equal([]byte(cmd.Name), consts.ContactResponse) {
 			tests.Failed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
 		}
 		tests.Passed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
