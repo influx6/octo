@@ -208,6 +208,8 @@ func (s *BasicServeHTTP) Contact() octo.Contact {
 func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Started")
 
+	w.Header().Add("Connection", "keep-alive")
+
 	defer r.Body.Close()
 
 	var data bytes.Buffer

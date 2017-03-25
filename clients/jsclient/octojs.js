@@ -4,6 +4,13 @@ const http = require("http")
 const url = require("url")
 const websocket = require("websocket-stream")
 
+// These are sets of possible message headers.
+const OK = "OK"
+const AuthRequest = "AUTH"
+const AuthResponse = "AUTHCRED"
+const AuthGranted = "AUTHGranted"
+const AuthDenied = "AUTHDenied"
+
 // Message returns a Buffer version of the jsonified object.
 function Message(obj){
 	return JSON.stringify(obj)
@@ -34,10 +41,10 @@ function ParseAuthCredentialsAsHeader(auth_credentail) {
 // ParseAuthCredentialsAsCommand returns the provided credentials in a structure which
 // meets the octo.Command struct.
 function ParseAuthCredentialsAsCommand(auth_credentail) {
-	return JSON.stringify({
-		"name":"AUTHCRED",
+	return new Buffer(JSON.stringify({
+		"name": AuthResponse,
 		"data": [auth_credentail],
-	})
+	}))
 }
 
 // Attr returns a default value object which defines the necessary
@@ -56,7 +63,6 @@ function Attr(addr, clusters, authenticate, headers, drops, recons){
 // Octo defines a function which returns a new instance of an object
 // which allows making request to a underlying octo http server.
 class Octo {
-
 	constructor(attr, callback) {
 	   if(attr === undefined || typeof attr == 'undefined'){
 	   	throw new Error("Expected to recieve attribute config")
@@ -66,14 +72,33 @@ class Octo {
 	   	 throw new Error("Expected 'addr' field in attribute/config object");
 	   }
 
+		 var callbacks = { data: null, error: null };
+
+		 switch(GetType(callback)){
+			 case "Function":
+			 	callbacks.data = callback
+				break
+
+			 case "Object":
+			  if(callback['data'] && GetType(callback.data) !== "Function"){
+					throw new Error("data field must be a function")
+				}
+
+			  if(callback['error'] && GetType(callback.error) !== "Function"){
+					throw new Error("error field must be a function")
+				}
+
+			 	callbacks = callback
+				break
+		 }
+
 	  this.attr = attr;
 	  this.servers = [];
 	  this.current = null;
-		this.callback = callback
+		this.callbacks = callbacks
 		this.prepareServers()
 	}
 
-	// Octo.getNextServer returns the next available working server.
 	prepareServers(){
 	  for(var index in this.attr.clusters){
 		  this.servers.push({ path: url.parse(this.attr.clusters[index]), reconns: 0, drops: 0, connected: false})
@@ -108,10 +133,9 @@ class Octo {
 // HTTP defines a function which returns a new instance of an object
 // which allows making request to a underlying octo http server.
 class HTTP extends Octo {
-
-	constructor(auth_credentail, attr, callback){
+	constructor(cred, attr, callback){
 		super(attr, callback)
-		this.credentials = auth_credentail
+		this.credentials = cred
 	}
 
 	// OctoHTTP.do calls the request to be made for a request with the data to
@@ -123,37 +147,186 @@ class HTTP extends Octo {
 
 		var self = this;
 
-		var req = http.request({
-			method: "POST",
-			path: "/",
-			port: this.current.path.port,
-			hostname: this.current.path.hostname,
-			headers: {
-				"Authorization": ParseAuthCredentialsAsHeader(this.credentials),
-				"Content-Type": "application/json",
-			},
-		}, function(res){
-			var incoming = []
-			res.on("data", function(chunk) {incoming.push(chunk); });
-			res.on("end", function(){
-				self.callback.call(self, incoming, res, self)
-			})
-		});
+		try {
+			var req = http.request({
+				method: "POST",
+				path: "/",
+				port: this.current.path.port,
+				hostname: this.current.path.hostname,
+				headers: {
+					"Authorization": ParseAuthCredentialsAsHeader(this.credentials),
+					"Content-Type": "application/json",
+				},
+			}, function(res){
+				var incoming = []
 
-		req.end(data, deliveryCallback);
+				res.setEncoding('utf8')
+				res.on("data", function(chunk) {
+					incoming.push(chunk);
+				});
 
+				res.on("end", function(){
+					if(self.callbacks['data']){
+						self.callbacks.data.call(self, incoming, res, self)
+					}
+				})
+			});
+
+			req.on("error", function(e){
+					if(self.callbacks['error']){
+						self.callbacks.error.call(self, e, req, self)
+					}
+
+				this.current.drops++
+			});
+
+			req.end(data, deliveryCallback);
+		}catch(e){
+				this.current.drops++
+		}
 	}
 }
 
 // Websocket defines a function which returns a new instance of an object
 // which allows making request to a underlying octo http server.
 class Websocket extends Octo {
-
-	constructor(auth_credentail, attr, callback, connectionCallback){
+	constructor(cred, attr, callback){
 		super(attr, callback)
-		this.socket = null
-		this.onConnect = connectionCallback
-		this.credentials = auth_credentail
+		this.buffer = [];
+		this.servers = [];
+		this.socket = null;
+		this.credentials = cred;
+		this.authenticated = false;
+		this.prepareServers();
+	}
+
+	prepareServers(){
+	  for(var index in this.attr.clusters){
+			var pu = url.parse(this.attr.clusters[index])
+
+			switch(pu.protocol){
+				case "http:":
+					pu.protocol = "ws:"
+					break
+				case "https:", "tls":
+					pu.protocol = "wss:"
+					break
+			}
+
+		  this.servers.push({
+				path: url.parse(url.format(pu, {fragment: true, unicode:true, auth: true})),
+				reconns: 0,
+				drops: 0,
+				connected: false
+			})
+	  }
+
+		var pu = url.parse(this.attr.addr)
+
+		switch(pu.protocol){
+			case "http:":
+				pu.protocol = "ws:"
+				break
+			case "https:", "tls":
+				pu.protocol = "wss:"
+				break
+		}
+
+	  this.servers.push({
+			path: url.parse(url.format(pu, {fragment: true, unicode:true, auth: true})),
+			reconns: 0,
+			drops: 0,
+			connected: false,
+		})
+	}
+
+	on(){
+		if(this.socket == null){
+			return
+		}
+
+		this.socket.on.apply(this.socket, Array.prototype.slice.call(arguments));
+	}
+
+	once(){
+		if(this.socket == null){
+			return
+		}
+
+		this.socket.once.apply(this.socket, Array.prototype.slice.call(arguments));
+	}
+
+  _handleMessageParsing(message){
+		switch(GetType(message)){
+			case "Buffer":
+				return JSON.parse(message.toString())
+			case "String":
+				return JSON.parse(message)
+			case "Object":
+				return message
+			default:
+			  throw new Error("Unknown type")
+		}
+	}
+
+  _handleMessage(message, socket, next){
+		var self = this;
+
+		if(!message["name"] && next){
+		  console.log("Passing Message Data to Next: ", message);
+			return next.call(self,message, socket, self)
+		}
+
+	  console.log("Handling Message Data: ", message);
+		switch(message.name){
+			case "OK":
+			 return
+
+			case AuthRequest:
+			 console.log("Authentication Requested!");
+
+			 var data = ParseAuthCredentialsAsCommand(self.credentials);
+			 console.log("Authentication Data: ", data);
+
+			 try{
+				 socket.write(data);
+			 }catch(e){
+				 console.log("Write Error: ", e)
+			 }
+
+			 return
+
+			case AuthDenied:
+			  console.log("Authentication Successfull!")
+			  self.authenticated = false;
+				return
+
+			case AuthGranted:
+			 console.log("Authentication Successfull!");
+
+			 self.buffer.each(function(data){
+				 console.log("Writing buffered data: ", data);
+				 socket.Write(data);
+			 });
+
+			 self.authenticated = true;
+			 self.buffer = []
+			 return
+		}
+	}
+
+	_handleInternals(message, next, socket){
+		var self = this;
+
+		// Attempt to handle message internally if there is error
+		// pass it to the next handler.
+		try{
+			self._handleMessage(self._handleMessageParsing(message), socket, next)
+		}catch(e){
+			if(next !== null && next !== undefined){
+				next(message, socket, self)
+			}
+		}
 	}
 
 	Do(data){
@@ -165,27 +338,65 @@ class Websocket extends Octo {
 			throw new Error("Invalid protocol for socket address");
 		};
 
+		var self = this;
 
 		if(this.socket === null){
-			this.socket = websocket(this.current.path.toString())
+			try {
+				console.log("Attempting Websocket Addr: ", this.current.path.href)
+				this.socket = websocket(this.current.path.href)
 
-			this.socket.on("error", function(err){
-				console.log("SocketError: ", err)
-			});
+				this.socket.on("connect", function(){
+					console.log("Connected to: ", self.current.path.href)
 
-			this.socket.on("close", function(){
-				this.socket = null;
-			});
+					self.current.connected = true
+					if(self.callbacks['connects']){
+						self.callbacks.connects.call(self, self.socket, self)
+					}
+				});
 
-			this.socket.on("data", function(o){
-				this.callback(o);
-			});
+
+				this.socket.on("error", function(err){
+					if(self.callbacks['error']){
+						self.callbacks.error.call(self, err, self.socket, self)
+					}
+				});
+
+				this.socket.on("close", function(){
+					console.log("Closing connection to: ", self.current.path.href)
+
+					if(self.callbacks['close']){
+						self.callbacks.close.call(self, self.socket, self)
+					}
+
+					self.socket = null;
+				});
+
+				this.socket.on("data", function(data){
+					console.log("Recieved: ", data.toString())
+					self._handleInternals(data, self.callbacks['data'], self.socket)
+				});
+
+				// this.socket.write(ParseAuthCredentialsAsCommand(self.credentials))
+			}catch(e){
+				this.current.drops++
+			}
+		}
+
+		if(this.attr.authenticate && !this.authenticated){
+			this.buffer.push(data)
+			return
 		}
 
 		this.socket.write(data)
 	}
 }
 
+// GetType returns the internal type of the provided item.
+function GetType(item){
+	if(item !== undefined && item != null) {
+		return (item.constructor.toString().match(/function (.*)\(/)[1])
+	}
+}
 
 module.exports = {
 	Octo: Octo,

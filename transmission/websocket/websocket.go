@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/influx6/faux/context"
@@ -219,14 +220,15 @@ type BaseSocketServer struct {
 	info               octo.Contact
 	system             transmission.System
 	base               *transmission.BaseSystem
-	cl                 sync.Mutex
-	clients            []*Client
 	upgrader           websocket.Upgrader
+	cl                 sync.Mutex
+	clients            map[string]*Client
 }
 
 // NewBaseSocketServer returns a new instance of a BaseSocketServer.
 func NewBaseSocketServer(instruments octo.Instrumentation, attr BaseSocketAttr, info octo.Contact, credentials octo.Credentials, system transmission.System) *BaseSocketServer {
 	var base BaseSocketServer
+	base.clients = make(map[string]*Client)
 	base.instruments = instruments
 	base.Attr = attr
 	base.info = info
@@ -253,11 +255,17 @@ func NewBaseSocketServer(instruments octo.Instrumentation, attr BaseSocketAttr, 
 // Clients returns the client list of the BaseSocketServer object.
 func (s *BaseSocketServer) Clients() []*Client {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.Clients", "Started")
+
+	var clients []*Client
+
 	s.cl.Lock()
-	defer s.cl.Unlock()
+	for _, item := range s.clients {
+		clients = append(clients, item)
+	}
+	s.cl.Unlock()
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BasicSocketServer.Clients", "Completed")
-	return s.clients[0:]
+	return clients
 }
 
 // Contact returns the giving info struct for the giving socket server.
@@ -284,20 +292,11 @@ func (s *BaseSocketServer) Close() error {
 func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "Started")
 
-	var index int
-
-	s.cl.Lock()
-	{
-		index = len(s.clients)
-	}
-	s.cl.Unlock()
-
 	var cuuid = uuid.NewV4().String()
 
 	var client Client
 	client.server = s
 	client.instruments = s.instruments
-	client.index = index
 	client.Request = r
 	client.system = s.system
 	client.primary = s.base
@@ -316,12 +315,6 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	client.Conn = conn
 
-	if err := client.authenticate(); err != nil {
-		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
-		conn.Close()
-		return
-	}
-
 	if err := client.Listen(); err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "WebSocket Upgrade : %+q : %+q", r.RemoteAddr, err.Error())
 		return
@@ -329,7 +322,7 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	s.cl.Lock()
 	{
-		s.clients = append(s.clients, &client)
+		s.clients[client.info.UUID] = &client
 	}
 	s.cl.Unlock()
 
@@ -353,7 +346,6 @@ type Client struct {
 	sg            sync.WaitGroup
 	server        *BaseSocketServer
 	cl            sync.Mutex
-	index         int
 	running       bool
 	doClose       bool
 	authenticated bool
@@ -402,16 +394,40 @@ func (c *Client) authorizationByRequest() error {
 	}
 
 	{
-		var authResponse octo.Command
 
-		messageType, message, err := c.Conn.ReadMessage()
+		var authResponse octo.Command
+		var messageType int
+		var message []byte
+
+		{
+			var failedReads int
+			var err error
+
+		authloop:
+			for {
+				c.Conn.SetReadDeadline(time.Now().Add(consts.ReadTimeout))
+
+				messageType, message, err = c.Conn.ReadMessage()
+				if err != nil {
+					c.Conn.SetReadDeadline(time.Time{})
+
+					// If we have passed acceptable reads thresholds then fail.
+					if failedReads >= consts.MaxAcceptableReadFails {
+						c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
+						return err
+					}
+
+					failedReads++
+					continue authloop
+				}
+
+				break authloop
+			}
+
+		}
+
 		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.authenticateByRequest", "Type: %d, Message: %+q", messageType, message)
 		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed")
-
-		if err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
-			return err
-		}
 
 		if err := json.NewDecoder(bytes.NewBuffer(message)).Decode(&authResponse); err != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
@@ -432,11 +448,17 @@ func (c *Client) authorizationByRequest() error {
 		}
 
 		if merr := c.system.Authenticate(credential); merr != nil {
+			cmd, _, _ := utils.NewCommandByte(consts.AuthroizationDenied)
+
+			if serr := c.Send(cmd, true); serr != nil {
+				c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Failed to deliver denied message :  %+q", serr.Error())
+			}
+
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", merr.Error())
 			return merr
 		}
 
-		cmd, _, cerr := utils.NewCommandByte(consts.OK)
+		cmd, _, cerr := utils.NewCommandByte(consts.AuthroizationGranted)
 		if cerr != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", cerr.Error())
 			return cerr
@@ -562,19 +584,7 @@ func (c *Client) Close() error {
 
 	c.server.cl.Lock()
 	{
-		if len(c.server.clients) == 0 {
-			c.server.clients = nil
-			c.server.cl.Unlock()
-			return nil
-		}
-
-		if len(c.server.clients) == 1 {
-			c.server.clients = nil
-			c.server.cl.Unlock()
-			return nil
-		}
-
-		c.server.clients = append(c.server.clients[:c.index], c.server.clients[c.index+1:]...)
+		delete(c.server.clients, c.info.UUID)
 	}
 	c.server.cl.Unlock()
 
@@ -596,6 +606,11 @@ func (c *Client) Listen() error {
 		c.running = true
 	}
 	c.cl.Unlock()
+
+	if err := c.authenticate(); err != nil {
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Listen", "WebSocket Authentication : %+q : %+q", c.Request.RemoteAddr, err.Error())
+		return c.Close()
+	}
 
 	c.wg.Add(1)
 	go c.acceptRequests()

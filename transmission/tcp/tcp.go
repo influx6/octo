@@ -408,7 +408,7 @@ func (c *Client) initClusterNegotiation() error {
 		return ErrInvalidResponse
 	}
 
-	if !bytes.Equal(messages[0].Name, consts.ClusterResponse) {
+	if !bytes.Equal([]byte(messages[0].Name), consts.ClusterResponse) {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
 		return ErrAuthInvalidResponse
 	}
@@ -464,7 +464,7 @@ func (c *Client) initSlaveContactNegotiation() error {
 			return ErrInvalidResponse
 		}
 
-		if !bytes.Equal(messages[0].Name, consts.ContactRequest) {
+		if !bytes.Equal([]byte(messages[0].Name), consts.ContactRequest) {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidContactResponse)
 			return ErrInvalidContactResponse
 		}
@@ -502,7 +502,7 @@ func (c *Client) initSlaveContactNegotiation() error {
 			return ErrInvalidResponse
 		}
 
-		if !bytes.Equal(messages[0].Name, consts.OK) {
+		if !bytes.Equal([]byte(messages[0].Name), consts.OK) {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected OK", ErrInvalidResponse)
 			return ErrInvalidResponse
 		}
@@ -547,7 +547,7 @@ func (c *Client) initContactNegotiation() error {
 		return ErrInvalidResponse
 	}
 
-	if !bytes.Equal(messages[0].Name, consts.ContactResponse) {
+	if !bytes.Equal([]byte(messages[0].Name), consts.ContactResponse) {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrAuthInvalidResponse)
 		return ErrAuthInvalidResponse
 	}
@@ -603,7 +603,7 @@ func (c *Client) initSlaveAuthNegotiation() error {
 			return ErrInvalidResponse
 		}
 
-		if !bytes.Equal(messages[0].Name, consts.AuthRequest) {
+		if !bytes.Equal([]byte(messages[0].Name), consts.AuthRequest) {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected Two Data Packs {INFO}:{CREDENTIALS}", ErrInvalidContactResponse)
 			return ErrAuthInvalidResponse
 		}
@@ -641,7 +641,7 @@ func (c *Client) initSlaveAuthNegotiation() error {
 			return ErrInvalidResponse
 		}
 
-		if !bytes.Equal(messages[0].Name, consts.AuthroizationGranted) {
+		if !bytes.Equal([]byte(messages[0].Name), consts.AuthroizationGranted) {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s : Expected AUTHGRANTED", ErrAuthInvalidResponse)
 			return ErrAuthInvalidResponse
 		}
@@ -683,7 +683,7 @@ func (c *Client) initAuthNegotiation() error {
 		return ErrInvalidResponse
 	}
 
-	if !bytes.Equal(messages[0].Name, consts.AuthResponse) {
+	if !bytes.Equal([]byte(messages[0].Name), consts.AuthResponse) {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", ErrAuthInvalidResponse)
 		return ErrAuthInvalidResponse
 	}

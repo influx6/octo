@@ -34,6 +34,7 @@ const (
 	MaxBufferSize             = (1024 * 1024)
 	MaxDataWrite              = 6048
 	MaxAcceptableEOF          = 10
+	MaxAcceptableReadFails    = 10
 	MaxAcceptableReadTimeout  = 5
 	MaxTotalReconnection      = 20
 	MaxTotalConnectionFailure = 20

@@ -81,7 +81,7 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 func TestWebsocketServer(t *testing.T) {
 	system := &mockSystem{t: t}
 
-	ws := websocket.New(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()}), websocket.SocketAttr{
+	ws := websocket.New(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewTestLogger()}), websocket.SocketAttr{
 		Addr:         ":4050",
 		Authenticate: true,
 		Headers: map[string]string{
@@ -172,7 +172,7 @@ func TestWebsocketSystem(t *testing.T) {
 	})
 
 	system := &mockSystem{t: t}
-	ws := websocket.NewBaseSocketServer(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewLogger()}), websocket.BaseSocketAttr{
+	ws := websocket.NewBaseSocketServer(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewTestLogger()}), websocket.BaseSocketAttr{
 		Authenticate: true,
 	}, utils.NewContact(":6050"), pocket, system)
 
@@ -253,7 +253,7 @@ func TestWebsocketSystem(t *testing.T) {
 		}
 		tests.Passed("Should have successfully received command type from server.")
 
-		if !bytes.Equal([]byte(cmd.Name), consts.OK) {
+		if !bytes.Equal([]byte(cmd.Name), consts.AuthroizationGranted) {
 			tests.Failed("Should have successfully passed AUTH process with server.")
 		}
 		tests.Passed("Should have successfully passsed AUTH process with server.")

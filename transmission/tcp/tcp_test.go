@@ -57,15 +57,15 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 
 	for _, command := range cmds {
 
-		switch {
+		switch command.Name {
 		// case bytes.Equal(consts.AuthRequest, command.Name):
-		case bytes.Equal([]byte("PUMP"), command.Name):
+		case "PUMP":
 			return tx.Send([]byte("RUMP"), true)
-		case bytes.Equal([]byte("REX"), command.Name):
+		case "REX":
 			return tx.Send([]byte("DEX"), true)
-		case bytes.Equal([]byte("BULL"), command.Name):
+		case "BULL":
 			return tx.SendAll(byteutils.MakeByteMessage([]byte("PRINT"), command.Data...), true)
-		case bytes.Equal([]byte("BONG"), command.Name):
+		case "BONG":
 			return tx.Send([]byte("BING"), true)
 		default:
 			break
@@ -293,7 +293,7 @@ func validateResponseHeader(t *testing.T, data []byte, target []byte) {
 	}
 	tests.Passed("Should have successfully received atleast 1 response from server.")
 
-	if !bytes.Equal(receivedMessages[0].Name, target) {
+	if !bytes.Equal([]byte(receivedMessages[0].Name), target) {
 		tests.Failed("Should have successfully matched response header as %+q but got %+q.", target, receivedMessages[0].Name)
 	}
 	tests.Passed("Should have successfully matched response header as %+q.", target)

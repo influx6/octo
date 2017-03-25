@@ -15,11 +15,11 @@ import (
 // Stream defines an interface which exposes methods to transmit data over
 // a giving transmit.
 type Stream interface {
+	Send(data []byte, flush bool) error
+	SendAll(data []byte, flush bool) error
 	Close() error
 	Contact() (octo.Contact, octo.Contact)
 	Ctx() context.Context
-	Send(data []byte, flush bool) error
-	SendAll(data []byte, flush bool) error
 }
 
 // Server defines a type which exposes a method to service a provided
