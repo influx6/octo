@@ -107,11 +107,13 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
 
-		var received jsoni.CommandMessage
-		if err := json.Unmarshal(recorder.Body.Bytes(), &received); err != nil {
+		var receivedMessages []jsoni.CommandMessage
+		if err := json.Unmarshal(recorder.Body.Bytes(), &receivedMessages); err != nil {
 			tests.Failed("Should have successfully parsed response for command %q: %q", "info", err.Error())
 		}
 		tests.Passed("Should have successfully parsed response for command %q", "info")
+
+		received := receivedMessages[0]
 
 		if received.Name != string(consts.ContactResponse) {
 			tests.Failed("Should have successfully matched response command as %+q", consts.ContactResponse)

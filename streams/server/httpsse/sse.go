@@ -227,19 +227,6 @@ func (s *SSEServerMux) authenticate(request *http.Request) error {
 func (s *SSEServerMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpsee.SSEServerMux.ServeHTTP", "Started")
 
-	s.instruments.RecordConnectionOp(octo.ConnectionConnet, s.info.UUID, r.RemoteAddr, s.info.Addr, map[string]interface{}{
-		"pkg": "github.com/influx6/octo/transmission/httpsse",
-	})
-
-	defer s.instruments.RecordConnectionOp(octo.ConnectionDisconnect, s.info.UUID, r.RemoteAddr, s.info.Addr, map[string]interface{}{
-		"pkg": "github.com/influx6/octo/transmission/httpsse",
-	})
-
-	defer s.instruments.RecordGoroutineOp(octo.GoroutineClosed, s.info.UUID, map[string]interface{}{
-		"from": r.RemoteAddr,
-		"pkg":  "github.com/influx6/octo/transmission/httpsse",
-	})
-
 	if err := s.authenticate(r); err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpsee.WeaveServer.ServeHTTP", "Completed : Error : Failed to autnethicate : %+q", err)
 		http.Error(w, "Http Streaming not supported", http.StatusInternalServerError)
@@ -291,9 +278,14 @@ func (s *SSEServerMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 
 				if !raw {
-					s.instruments.RecordDataOp(octo.DataWrite, s.info.UUID, nil, data, map[string]interface{}{
-						"to":  r.RemoteAddr,
-						"pkg": "github.com/influx6/octo/transmission/httpsse",
+					s.instruments.NotifyEvent(octo.Event{
+						Type:       octo.DataWrite,
+						Client:     s.info.UUID,
+						Server:     s.info.SUUID,
+						LocalAddr:  s.info.Local,
+						RemoteAddr: s.info.Remote,
+						Data:       octo.NewDataInstrument(data, nil),
+						Details:    map[string]interface{}{},
 					})
 
 					fmt.Fprintf(w, "%s", data)
@@ -303,9 +295,14 @@ func (s *SSEServerMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					continue messageLoop
 				}
 
-				s.instruments.RecordDataOp(octo.DataWrite, s.info.UUID, nil, []byte(fmt.Sprintf("data: %+q\n\n", data)), map[string]interface{}{
-					"to":  r.RemoteAddr,
-					"pkg": "github.com/influx6/octo/transmission/httpsse",
+				s.instruments.NotifyEvent(octo.Event{
+					Type:       octo.DataWrite,
+					Client:     s.info.UUID,
+					Server:     s.info.SUUID,
+					LocalAddr:  s.info.Local,
+					RemoteAddr: s.info.Remote,
+					Data:       octo.NewDataInstrument([]byte(fmt.Sprintf("data: %+q\n\n", data)), nil),
+					Details:    map[string]interface{}{},
 				})
 
 				fmt.Fprintf(w, "data: %s\n\n", data)
