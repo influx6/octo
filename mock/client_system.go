@@ -5,8 +5,9 @@ import (
 	"sync"
 
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/goclient"
 	"github.com/influx6/octo/consts"
+	"github.com/influx6/octo/messages/jsoni"
+	"github.com/influx6/octo/streams/client"
 )
 
 // ClientSystem defines a base system which can be used for testing.
@@ -33,8 +34,8 @@ func (c *ClientSystem) Credential() octo.AuthCredential {
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (c *ClientSystem) Serve(message interface{}, tx goclient.Stream) error {
-	command, ok := message.(octo.Command)
+func (c *ClientSystem) Serve(message interface{}, tx client.Stream) error {
+	command, ok := message.(jsoni.CommandMessage)
 	if !ok {
 		return consts.ErrUnsupportedFormat
 	}
@@ -60,11 +61,11 @@ func (c *ClientSystem) Serve(message interface{}, tx goclient.Stream) error {
 type CallbackClientSystem struct {
 	base octo.AuthCredential
 	wg   sync.WaitGroup
-	cb   func(octo.Command, goclient.Stream) error
+	cb   func(jsoni.CommandMessage, client.Stream) error
 }
 
 // NewCallbackClientSystem returns a new system instance for accessing a octo.ClientSystem.
-func NewCallbackClientSystem(b octo.AuthCredential, cb func(octo.Command, goclient.Stream) error) *CallbackClientSystem {
+func NewCallbackClientSystem(b octo.AuthCredential, cb func(jsoni.CommandMessage, client.Stream) error) *CallbackClientSystem {
 	return &CallbackClientSystem{
 		base: b,
 		cb:   cb,
@@ -82,8 +83,8 @@ func (c *CallbackClientSystem) Credential() octo.AuthCredential {
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (c *CallbackClientSystem) Serve(message interface{}, tx goclient.Stream) error {
-	command, ok := message.(octo.Command)
+func (c *CallbackClientSystem) Serve(message interface{}, tx client.Stream) error {
+	command, ok := message.(jsoni.CommandMessage)
 	if !ok {
 		return consts.ErrUnsupportedFormat
 	}

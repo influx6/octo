@@ -1,14 +1,13 @@
 package mock
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
-	"github.com/influx6/octo/parsers/blockparser"
-	"github.com/influx6/octo/transmission"
+	"github.com/influx6/octo/messages/commando"
+	stream "github.com/influx6/octo/streams/server"
 )
 
 // ServerSystem defines a base system which can be used for testing.
@@ -24,13 +23,18 @@ func NewServerSystem(b octo.AuthCredential) *ServerSystem {
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (s *ServerSystem) Serve(message []byte, tx transmission.Stream) error {
-	cmds, err := blockparser.Blocks.Parse(message)
+func (s *ServerSystem) Serve(message []byte, tx stream.Stream) error {
+	cmds, err := commando.Parser.Decode(message)
 	if err != nil {
 		return err
 	}
 
-	for _, command := range cmds {
+	commands, ok := cmds.([]commando.CommandMessage)
+	if !ok {
+		return consts.ErrUnservable
+	}
+
+	for _, command := range commands {
 		switch command.Name {
 		case string(consts.ContactRequest):
 			return tx.Send([]byte("OK"), true)
@@ -63,7 +67,7 @@ func (s *ServerSystem) Authenticate(cred octo.AuthCredential) error {
 		return errors.New("Token does not match")
 	}
 
-	if !bytes.Equal(s.base.Data, cred.Data) {
+	if s.base.Data != cred.Data {
 		return errors.New("Data  does not match")
 	}
 
@@ -85,11 +89,11 @@ func NewServerCommandSystem(b octo.AuthCredential) *ServerCommandSystem {
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (s *ServerCommandSystem) Serve(message []byte, tx transmission.Stream) error {
-	var commands []octo.Command
+func (s *ServerCommandSystem) Serve(message []byte, tx stream.Stream) error {
+	var commands []commando.CommandMessage
 
 	if err := json.Unmarshal(message, &commands); err != nil {
-		var single octo.Command
+		var single commando.CommandMessage
 
 		if errx := json.Unmarshal(message, &single); errx != nil {
 			return errx
@@ -101,21 +105,21 @@ func (s *ServerCommandSystem) Serve(message []byte, tx transmission.Stream) erro
 	for _, command := range commands {
 		switch command.Name {
 		case string(consts.ContactRequest):
-			cmdData, err := json.Marshal(octo.Command{Name: ("OK")})
+			cmdData, err := json.Marshal(commando.CommandMessage{Name: ("OK")})
 			if err != nil {
 				return err
 			}
 
 			return tx.Send(cmdData, true)
 		case "PUMP":
-			cmdData, err := json.Marshal(octo.Command{Name: ("RUMP")})
+			cmdData, err := json.Marshal(commando.CommandMessage{Name: ("RUMP")})
 			if err != nil {
 				return err
 			}
 
 			return tx.Send(cmdData, true)
 		case "REX":
-			cmdData, err := json.Marshal(octo.Command{Name: ("DEX")})
+			cmdData, err := json.Marshal(commando.CommandMessage{Name: ("DEX")})
 			if err != nil {
 				return err
 			}
@@ -123,7 +127,7 @@ func (s *ServerCommandSystem) Serve(message []byte, tx transmission.Stream) erro
 			return tx.Send(cmdData, true)
 
 		case "BONG":
-			cmdData, err := json.Marshal(octo.Command{Name: ("BING")})
+			cmdData, err := json.Marshal(commando.CommandMessage{Name: ("BING")})
 			if err != nil {
 				return err
 			}
@@ -153,7 +157,7 @@ func (s *ServerCommandSystem) Authenticate(cred octo.AuthCredential) error {
 		return errors.New("Token does not match")
 	}
 
-	if !bytes.Equal(s.base.Data, cred.Data) {
+	if s.base.Data != cred.Data {
 		return errors.New("Data  does not match")
 	}
 

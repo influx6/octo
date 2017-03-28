@@ -22,18 +22,21 @@ const (
 	MinTempSleep              = 10 * time.Millisecond
 	MaxSleepTime              = 2 * time.Second
 	MinSleepTime              = 10 * time.Millisecond
-	FlushDeline               = 2 * time.Second
+	FlushDeadline             = 2 * time.Second
 	ConnectDeadline           = 4 * time.Second
 	MaxWaitTime               = 3 * time.Second
 	MaxWaitReadTime           = 5 * time.Second
 	OverMaxWaitReadTime       = 30 * time.Second
 	MaxWaitWriteTime          = 5 * time.Second
+	MaxPingInterval           = 5 * time.Second
 	MinDataSize               = 512
 	MaxConnections            = (64 * 1024)
 	MaxPayload                = (1024 * 1024)
 	MaxBufferSize             = (1024 * 1024)
 	MaxDataWrite              = 6048
 	MaxAcceptableEOF          = 10
+	MaxAcceptableMissingPings = 30
+	MaxAcceptableMissingPongs = 30
 	MaxAcceptableReadFails    = 10
 	MaxAcceptableReadTimeout  = 5
 	MaxTotalReconnection      = 20
@@ -55,6 +58,7 @@ var (
 	Empty                 = []byte("")
 	PING                  = []byte("PING")
 	PONG                  = []byte("PONG")
+	CLOSE                 = []byte("CLOSE")
 	ClientContactRequest  = []byte("CLINFO")
 	ClientContactResponse = []byte("CLINFORES")
 	ContactRequest        = []byte("INFO")
@@ -72,8 +76,10 @@ var (
 
 // contains the set of errors used by the package.
 var (
+	ErrEmptyMessage       = errors.New("Empty Message received")
 	ErrConnClosed         = errors.New("Connection Closed")
 	ErrUnsupported        = errors.New("Functionality is unsupported")
+	ErrUnservable         = errors.New("Command is not servable by system")
 	ErrUnsupportedFormat  = errors.New("Format/Type is unsupported")
 	ErrTimeoutOverReached = errors.New("Maximum timeout allowed reached")
 

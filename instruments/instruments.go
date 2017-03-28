@@ -1,48 +1,56 @@
 package instruments
 
-import "github.com/influx6/octo"
+import (
+	"fmt"
+	"os"
 
-// InstrumentAttr defines an struct for configuring the function passed to the
-// created instruemental objects.
-type InstrumentAttr struct {
-	Log                octo.Logs // optional value as StdLogger will be used instead if nil.
-	OnDataUpdate       func(octo.DataInstrument)
-	OnGoroutineUpdate  func(octo.GoroutineInstrument)
-	OnConnectionUpdate func(octo.ConnectionInstrument)
-}
+	"github.com/influx6/octo"
+)
 
-// Instrument returns a new Insturmentation object based on the InstrumentationBase
-// struct and passes the giving functions from the InstrumentAttr as the function
-// to be called for each instrumentation.
-func Instrument(attr InstrumentAttr) octo.Instrumentation {
-	if attr.Log == nil {
-		attr.Log = &StdLogger{}
-	}
+//================================================================================
 
-	return InstrumentationBase{
-		Logs:                      attr.Log,
-		DataInstrumentation:       NewDataInstrumentationRecorder(attr.OnDataUpdate),
-		GoRoutineInstrumentation:  NewGoroutineInstrumentationRecorder(attr.OnGoroutineUpdate),
-		ConnectionInstrumentation: NewConnectionInstrumentationRecorder(attr.OnConnectionUpdate),
-	}
-}
-
-// NewInstrumentation returns a new InstrumentationBase instance which unifies
-// the instrumentation provides for providing a unified instrumentation object.
-func NewInstrumentation(log octo.Logs, datas octo.DataInstrumentation, gor octo.GoRoutineInstrumentation, conns octo.ConnectionInstrumentation) octo.Instrumentation {
-	return InstrumentationBase{
-		Logs:                      log,
-		DataInstrumentation:       datas,
-		GoRoutineInstrumentation:  gor,
-		ConnectionInstrumentation: conns,
-	}
-}
-
-// InstrumentationBase defines a struct which provides a implementation for the
-// Instrumentation interface.
-type InstrumentationBase struct {
+type instruments struct {
 	octo.Logs
-	octo.DataInstrumentation
-	octo.GoRoutineInstrumentation
-	octo.ConnectionInstrumentation
+	octo.Events
+}
+
+// Instruments returns a giving struct which implements the octo.Insturmentation
+// interface and provides logging and event delivery capabilities.
+func Instruments(logger octo.Logs, events octo.Events) octo.Instrumentation {
+	if logger == nil {
+		logger = &StdLogger{}
+	}
+
+	if events == nil {
+		events = &EventDelivery{}
+	}
+
+	return &instruments{
+		Logs:   logger,
+		Events: events,
+	}
+}
+
+//================================================================================
+
+// StdLogger defines a structure that implements the octo.Log interface.
+type StdLogger struct{}
+
+// Log exposes methods to giving logger to the internal testing.T object.
+func (StdLogger) Log(level string, namespace string, function string, message string, items ...interface{}) {
+	fmt.Fprintf(os.Stdout, "%s : %s : %s : %s\n", level, namespace, function, fmt.Sprintf(message, items...))
+}
+
+//================================================================================
+
+// EventDelivery defines a struct which exposes a method to add events to the under
+// line slice.
+type EventDelivery struct {
+	events []octo.Event
+}
+
+// NotifyEvent adds the provided events into the underline map.
+func (e *EventDelivery) NotifyEvent(ev octo.Event) error {
+	e.events = append(e.events, ev)
+	return nil
 }
