@@ -10,9 +10,9 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/goclient"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
+	"github.com/influx6/octo/streams/client"
 	"github.com/influx6/octo/utils"
 )
 
@@ -40,8 +40,8 @@ type WebSocketPod struct {
 	curAddr     *srvAddr
 	bm          bytes.Buffer
 	wg          sync.WaitGroup
-	system      goclient.System
-	encoding    goclient.MessageEncoding
+	system      client.SystemServer
+	encoding    octo.MessageEncoding
 	cnl         sync.Mutex
 	doClose     bool
 	started     bool
@@ -72,7 +72,7 @@ func New(insts octo.Instrumentation, attr Attr) (*WebSocketPod, error) {
 }
 
 // Listen calls the connection to be create and begins serving requests.
-func (w *WebSocketPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) error {
+func (w *WebSocketPod) Listen(sm client.SystemServer, encoding octo.MessageEncoding) error {
 	w.cnl.Lock()
 	if w.started {
 		return nil

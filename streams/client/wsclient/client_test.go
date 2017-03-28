@@ -5,13 +5,13 @@ import (
 
 	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/goclient/wsclient"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/instruments"
+	"github.com/influx6/octo/messages/jsoni"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/netutils"
-	"github.com/influx6/octo/transmission/websocket"
-	"github.com/influx6/octo/utils"
+	"github.com/influx6/octo/streams/client/wsclient"
+	"github.com/influx6/octo/streams/server/websocket"
 )
 
 // TestClientConnectionWithAuth validates the behave of the tcp client for
@@ -24,14 +24,14 @@ func TestClientConnectionWithAuth(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	system := mock.NewServerSystem(octo.AuthCredential{
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -66,18 +66,13 @@ func TestClientConnectionWithAuth(t *testing.T) {
 
 	defer client.Close()
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err != nil {
+	if err := client.Listen(clientSystem, jsoni.Parser); err != nil {
 		tests.Failed("Should have successfully connected to websocket server with client: %+q.", err)
 	}
 	tests.Passed("Should have successfully connected to websocket server with client.")
 
-	cmdData, _, err := utils.NewCommandByte(consts.ContactRequest, nil)
+	err = client.Send(jsoni.CommandMessage{Name: string(consts.ContactRequest)}, true)
 	if err != nil {
-		tests.Failed("Should have successfully created command request: %+q.", err)
-	}
-	tests.Passed("Should have successfully created command request.")
-
-	if err := client.Send(cmdData, true); err != nil {
 		tests.Failed("Should have successfully delivered command to server: %+q.", err)
 	}
 	tests.Passed("Should have successfully delivered command to server.")
@@ -95,14 +90,14 @@ func TestClientConnectionWithoutAuth(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	system := mock.NewServerSystem(octo.AuthCredential{
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -137,7 +132,7 @@ func TestClientConnectionWithoutAuth(t *testing.T) {
 
 	defer client.Close()
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err == nil {
+	if err := client.Listen(clientSystem, jsoni.Parser); err != nil {
 		tests.Failed("Should have successfully failed connected to websocket server with client: %+q.", err)
 	}
 	tests.Passed("Should have successfully failed connected to websocket socket with client.")
