@@ -45,12 +45,9 @@ func (StdLogger) Log(level string, namespace string, function string, message st
 
 // EventDelivery defines a struct which exposes a method to add events to the under
 // line slice.
-type EventDelivery struct {
-	events []octo.Event
-}
+type EventDelivery struct{}
 
 // NotifyEvent adds the provided events into the underline map.
 func (e *EventDelivery) NotifyEvent(ev octo.Event) error {
-	e.events = append(e.events, ev)
 	return nil
 }

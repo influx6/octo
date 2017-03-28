@@ -14,35 +14,38 @@ const (
 
 // contains a giving set of constants for usage in other packages.
 const (
-	KeepAlivePeriod           = 5 * time.Minute
-	ReadTimeout               = 10 * time.Second
-	WriteTimeout              = 10 * time.Second
-	ReadTempTimeout           = 3 * time.Second
-	WriteTempTimeout          = 4 * time.Second
-	MinTempSleep              = 10 * time.Millisecond
-	MaxSleepTime              = 2 * time.Second
-	MinSleepTime              = 10 * time.Millisecond
-	FlushDeadline             = 2 * time.Second
-	ConnectDeadline           = 4 * time.Second
-	MaxWaitTime               = 3 * time.Second
-	MaxWaitReadTime           = 5 * time.Second
-	OverMaxWaitReadTime       = 30 * time.Second
-	MaxWaitWriteTime          = 5 * time.Second
-	MaxPingInterval           = 5 * time.Second
-	MinDataSize               = 512
-	MaxConnections            = (64 * 1024)
-	MaxPayload                = (1024 * 1024)
-	MaxBufferSize             = (1024 * 1024)
-	MaxDataWrite              = 6048
-	MaxAcceptableEOF          = 10
-	MaxAcceptableMissingPings = 30
-	MaxAcceptableMissingPongs = 30
-	MaxAcceptableReadFails    = 10
-	MaxAcceptableReadTimeout  = 5
-	MaxTotalReconnection      = 20
-	MaxTotalConnectionFailure = 20
-	WSReadTimeout             = 30 * time.Second
-	WSWriteTimeout            = 20 * time.Second
+	KeepAlivePeriod                = 5 * time.Minute
+	ReadTimeout                    = 10 * time.Second
+	WriteTimeout                   = 10 * time.Second
+	ReadTempTimeout                = 3 * time.Second
+	WriteTempTimeout               = 4 * time.Second
+	MinTempSleep                   = 10 * time.Millisecond
+	MaxSleepTime                   = 2 * time.Second
+	MinSleepTime                   = 10 * time.Millisecond
+	FlushDeadline                  = 2 * time.Second
+	ConnectDeadline                = 4 * time.Second
+	MaxWaitTime                    = 3 * time.Second
+	MaxWaitReadTime                = 5 * time.Second
+	OverMaxWaitReadTime            = 30 * time.Second
+	MaxWaitWriteTime               = 5 * time.Second
+	MaxPingInterval                = 5 * time.Second
+	MinDataSize                    = 512
+	MaxConnections                 = (64 * 1024)
+	MaxPayload                     = (1024 * 1024)
+	MaxBufferSize                  = (1024 * 1024)
+	MaxDataWrite                   = 6048
+	MaxAcceptableEOF               = 10
+	MaxAcceptablePPMissesThreshold = 50
+	MaxAcceptableMissingPongs      = 30
+	MaxAcceptableReadFails         = 10
+	MaxAcceptableReadTimeout       = 5
+	MaxTotalReconnection           = 20
+	MaxTotalConnectionFailure      = 20
+	WSReadTimeout                  = 30 * time.Second
+	WSWriteTimeout                 = 20 * time.Second
+	WaitTimeBeforeClustering       = 1 * time.Second
+	MaxPingPongResponseWait        = 7 * time.Minute
+	MaxPingPongInterval            = 2 * time.Minute
 )
 
 // Contains set variables for use in connection packages.

@@ -37,6 +37,7 @@ const (
 	ConnectionConnet
 	ConnectionDisconnect
 	ConnectionAuthenticate
+	ClusterConnection
 
 	DataRead
 	DataWrite

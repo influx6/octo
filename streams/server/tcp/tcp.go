@@ -65,8 +65,9 @@ func (t *Transmission) Close() error {
 // Client defines the tcp struct which implements the server.Stream
 // interface for communication between a server.
 type Client struct {
-	pingCounts            int64
-	pongCounts            int64
+	ppMisses              int64
+	pings                 chan struct{}
+	pongs                 chan struct{}
 	clusterClient         bool
 	connectionInitiator   bool
 	instruments           octo.Instrumentation
@@ -259,7 +260,86 @@ func (c *Client) shouldClose() bool {
 	return c.doClose
 }
 
-// acceptRequests beings listening for messages from the giving connection.
+// acceptPingCycle begins listening for continous ping/pong cycle requests which
+// incrementally increases a counter for the total ping/pong set and received.
+// If after
+// func (c *Client) acceptPingCycle() {
+// 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptPingCycle", "Started")
+// 	defer c.wg.Wait()
+//
+// 	c.instruments.NotifyEvent(octo.Event{
+// 		Type:       octo.GoroutineOpened,
+// 		Client:     c.info.UUID,
+// 		Server:     c.info.SUUID,
+// 		LocalAddr:  c.info.Local,
+// 		RemoteAddr: c.info.Remote,
+// 		Data:       octo.NewGoroutineInstrument(),
+// 		Details:    map[string]interface{}{},
+// 	})
+//
+// 	defer c.instruments.NotifyEvent(octo.Event{
+// 		Type:       octo.GoroutineClosed,
+// 		Client:     c.info.UUID,
+// 		Server:     c.info.SUUID,
+// 		LocalAddr:  c.info.Local,
+// 		RemoteAddr: c.info.Remote,
+// 		Data:       octo.NewGoroutineInstrument(),
+// 		Details:    map[string]interface{}{},
+// 	})
+//
+// 	for c.IsRunning() {
+// 		if c.ppMisses > consts.MaxAcceptablePPMissesThreshold {
+// 			// Connection has probably become stale or slow, we need to kill it.
+// 			go c.Close()
+// 			return
+// 		}
+//
+// 		select {
+// 		case <-c.pings:
+// 			c.awaitPong()
+// 			continue
+// 		case <-c.pongs:
+// 			c.awaitPing()
+// 			continue
+// 		}
+// 	}
+//
+// 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptPingCycle", "Completed")
+// }
+
+// awaitPing awaits a pong response for a giving ping request delivered.
+// func (c *Client) awaitPing() {
+// 	{
+// 		select {
+// 		case <-c.pings:
+// 			if c.ppMisses > 0 {
+// 				c.ppMisses--
+// 			}
+// 			return
+// 		case <-time.After(consts.MaxPingPongResponseWait):
+// 			c.ppMisses++
+// 			return
+// 		}
+// 	}
+// }
+
+// awaitPong awaits a pong response for a giving ping request delivered.
+// func (c *Client) awaitPong() {
+// 	{
+// 		select {
+// 		case <-c.pongs:
+// 			if c.ppMisses > 0 {
+// 				c.ppMisses--
+// 			}
+// 			return
+// 		case <-time.After(consts.MaxPingPongResponseWait):
+// 			c.ppMisses++
+// 			return
+// 		}
+// 	}
+// }
+
+// acceptRequests begins listening for messages from the giving connection.
 func (c *Client) acceptRequests() {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptRequests", "Started")
 	defer c.wg.Done()
@@ -890,8 +970,28 @@ func (c *Client) Send(data []byte, flush bool) error {
 			Details:    map[string]interface{}{},
 		})
 
-		if err == nil && flush {
-			err = c.writer.Flush()
+		if err != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Send", "Completed : %s", ErrDataOversized)
+
+			if deadline {
+				c.conn.SetWriteDeadline(time.Time{})
+			}
+
+			c.pl.Unlock()
+
+			// Is it a Temporary net.Error if so, possible slow consumer here, close
+			// connection.
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				go c.Close()
+			}
+
+			return err
+		}
+
+		if flush {
+			if ferr := c.writer.Flush(); ferr != nil {
+				c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Send", "Flush Error : %s", ferr)
+			}
 
 			if deadline {
 				c.conn.SetWriteDeadline(time.Time{})
@@ -899,12 +999,6 @@ func (c *Client) Send(data []byte, flush bool) error {
 		}
 
 		c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "tcp.Client.Send", "Completed")
-
-		if err != nil {
-			c.pl.Unlock()
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Send", "Completed : %s", ErrDataOversized)
-			return err
-		}
 
 	}
 	c.pl.Unlock()
@@ -930,6 +1024,7 @@ type ServerAttr struct {
 	Addr         string
 	ClusterAddr  string
 	Authenticate bool
+	Clusters     []string
 	TLS          *tls.Config
 	Credential   octo.AuthCredential // Credential for the server.
 }
@@ -938,25 +1033,26 @@ type ServerAttr struct {
 // of the way tcp works.
 type Server struct {
 	ServerAttr
-	instruments      octo.Instrumentation
-	info             octo.Contact
-	clusterContact   octo.Contact
-	listener         net.Listener
-	clusterListener  net.Listener
-	clientSystem     server.System
-	clusterSystem    *commando.SxConversations
-	clientBaseSystem *commando.SxConversations
-	wg               sync.WaitGroup
-	cg               sync.WaitGroup
-	clientLock       sync.Mutex
-	clients          []*Client
-	clientsContact   []octo.Contact
-	clusterLock      sync.Mutex
-	clusters         []*Client
-	clustersContact  []octo.Contact
-	rl               sync.RWMutex
-	running          bool
-	doClose          bool
+	instruments            octo.Instrumentation
+	info                   octo.Contact
+	clusterContact         octo.Contact
+	listener               net.Listener
+	clusterListener        net.Listener
+	clientSystem           server.System
+	clusterSystem          *commando.SxConversations
+	clientBaseSystem       *commando.SxConversations
+	wg                     sync.WaitGroup
+	cg                     sync.WaitGroup
+	clientLock             sync.Mutex
+	clients                []*Client
+	clientsContact         []octo.Contact
+	clusterLock            sync.Mutex
+	clusters               []*Client
+	clusterConnectFailures map[string]int
+	clustersContact        []octo.Contact
+	rl                     sync.RWMutex
+	running                bool
+	doClose                bool
 }
 
 // New returns a new Server which handles connections from clients and
@@ -982,6 +1078,7 @@ func New(instruments octo.Instrumentation, attr ServerAttr) *Server {
 
 	var s Server
 	s.ServerAttr = attr
+	s.clusterConnectFailures = make(map[string]int)
 	s.instruments = instruments
 	s.info = octo.Contact{
 		Remote: attr.Addr,
@@ -1187,6 +1284,8 @@ func (s *Server) RelateWithCluster(addr string) error {
 		},
 		server:              s,
 		conn:                conn,
+		pings:               make(chan struct{}),
+		pongs:               make(chan struct{}),
 		instruments:         s.instruments,
 		clusterClient:       true,
 		connectionInitiator: true,
@@ -1198,6 +1297,17 @@ func (s *Server) RelateWithCluster(addr string) error {
 	if err := client.Listen(); err != nil {
 		s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.RelateWithCluster", "New Client Error : %s", err.Error())
 		client.conn.Close()
+
+		// Record failure to connect client.
+		s.clusterLock.Lock()
+		{
+			if misses, ok := s.clusterConnectFailures[addr]; ok {
+				misses++
+				s.clusterConnectFailures[addr] = misses
+			}
+		}
+		s.clusterLock.Unlock()
+
 		return err
 	}
 
@@ -1205,8 +1315,19 @@ func (s *Server) RelateWithCluster(addr string) error {
 
 	s.clusterLock.Lock()
 	{
+
+		// Add client into the giving list
 		clientIndex = len(s.clusters)
 		s.clusters = append(s.clusters, &client)
+
+		// Since we connected successfully, reduce the failure count else register it.
+		if misses, ok := s.clusterConnectFailures[addr]; ok {
+			misses--
+			s.clusterConnectFailures[addr] = misses
+		} else {
+			s.clusterConnectFailures[addr] = 0
+		}
+
 	}
 	s.clusterLock.Unlock()
 
@@ -1214,16 +1335,36 @@ func (s *Server) RelateWithCluster(addr string) error {
 
 	s.cg.Add(1)
 	go func() {
+		var attemptAgain bool
+
 		client.Wait()
 		s.cg.Done()
 
 		s.clusterLock.Lock()
 		{
 			s.clusters = append(s.clusters[:clientIndex], s.clusters[clientIndex+1:]...)
+
+			if misses, ok := s.clusterConnectFailures[addr]; ok {
+				if misses > consts.MaxTotalConnectionFailure {
+					s.clusterLock.Unlock()
+					return
+				}
+
+				attemptAgain = true
+
+				misses++
+				s.clusterConnectFailures[addr] = misses
+			}
+
 		}
 		s.clusterLock.Unlock()
 
+		// Sort out cluster's lists properly.
 		s.generateClusterContact()
+
+		if attemptAgain {
+			s.RelateWithCluster(addr)
+		}
 	}()
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.RelateWithCluster", "Completed")
@@ -1442,6 +1583,8 @@ func (s *Server) handleClientConnections() {
 			},
 			server:              s,
 			conn:                conn,
+			pings:               make(chan struct{}),
+			pongs:               make(chan struct{}),
 			instruments:         s.instruments,
 			system:              s.clientBaseSystem,
 			authenticator:       s.clientSystem,
@@ -1524,6 +1667,34 @@ func (s *Server) handleClusterConnections() {
 
 	sleepTime := consts.MinSleepTime
 
+	// Setup the calls to immediately connect to clusters from provided clusters list
+	// if not empty and start after 1 second of clustring called.
+	if s.ServerAttr.Clusters != nil {
+		go func() {
+			<-time.After(consts.WaitTimeBeforeClustering)
+			for _, cluster := range s.ServerAttr.Clusters {
+				if err := s.RelateWithCluster(cluster); err != nil {
+					s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.handleClusterConnections", "Failed Connecting to Cluster : %q : %+q", cluster, err)
+
+					s.instruments.NotifyEvent(octo.Event{
+						Type:       octo.ClusterConnection,
+						Client:     s.clusterContact.UUID,
+						Server:     s.clusterContact.SUUID,
+						LocalAddr:  s.clusterContact.Local,
+						RemoteAddr: s.clusterContact.Remote,
+						Data:       octo.NewConnectionInstrument(cluster, s.clusterContact.Addr),
+						Details: map[string]interface{}{
+							"Addr": cluster,
+						},
+					})
+
+					continue
+				}
+			}
+		}()
+
+	}
+
 	for s.IsRunning() {
 
 		conn, err := s.clusterListener.Accept()
@@ -1580,6 +1751,8 @@ func (s *Server) handleClusterConnections() {
 			conn:                conn,
 			instruments:         s.instruments,
 			authenticator:       s.clientSystem,
+			pings:               make(chan struct{}),
+			pongs:               make(chan struct{}),
 			system:              s.clusterSystem,
 			clusterClient:       true,
 			connectionInitiator: false,
@@ -1614,7 +1787,11 @@ func (s *Server) handleClusterConnections() {
 
 			s.clusterLock.Lock()
 			{
-				s.clusters = append(s.clusters[:clientIndex], s.clusters[clientIndex+1:]...)
+				if len(s.clusters) == 0 {
+					s.clusters = nil
+				} else {
+					s.clusters = append(s.clusters[:clientIndex], s.clusters[clientIndex+1:]...)
+				}
 			}
 			s.clusterLock.Unlock()
 
@@ -1626,3 +1803,39 @@ func (s *Server) handleClusterConnections() {
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.handleClusterConnections", "Completed")
 }
+
+//================================================================================
+
+// pingPongConversationServer defines a new struct which implements the several message
+// handling for the commando message types.
+// type pingPongConversationServer struct {
+// 	c *Client
+// }
+//
+// // Serve handles the response requested by the giving commando.CommandMessage returning
+// // then needed response.
+// func (c pingPongConversationServer) Serve(cmd commando.CommandMessage, tx server.Stream) error {
+// 	switch cmd.Name {
+// 	case string(consts.PONG):
+// 		return tx.Send(commando.WrapResponseBlock(consts.PING, nil), true)
+//
+// 	case string(consts.PING):
+// 		return tx.Send(commando.WrapResponseBlock(consts.PONG, nil), true)
+//
+// 	default:
+// 		return consts.ErrUnservable
+// 	}
+// }
+//
+// // CanServe returns true/false if the giving element is able to server the
+// // provided message.Command.
+// func (c pingPongConversationServer) CanServe(cmd commando.CommandMessage) bool {
+// 	switch cmd.Name {
+// 	case string(consts.PONG):
+// 		return true
+// 	case string(consts.PING):
+// 		return true
+// 	default:
+// 		return false
+// 	}
+// }
