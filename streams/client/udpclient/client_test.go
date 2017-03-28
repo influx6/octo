@@ -5,13 +5,13 @@ import (
 
 	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/goclient/udpclient"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/instruments"
+	"github.com/influx6/octo/messages/commando"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/netutils"
-	"github.com/influx6/octo/transmission/udp"
-	"github.com/influx6/octo/utils"
+	"github.com/influx6/octo/streams/client/udpclient"
+	"github.com/influx6/octo/streams/server/udp"
 )
 
 func TestClientConnectionWithUnknownVersion(t *testing.T) {
@@ -65,7 +65,7 @@ func TestClientConnectionWithBadServers(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -86,12 +86,12 @@ func TestClientConnectionWithBadServers(t *testing.T) {
 
 	defer client.Close()
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err == nil {
+	if err := client.Listen(clientSystem, commando.Parser); err == nil {
 		tests.Failed("Should have sucessfully failed to connect to any server.")
 	}
 	tests.Passed("Should have sucessfully failed to connect to any server.")
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err == nil {
+	if err := client.Listen(clientSystem, commando.Parser); err == nil {
 		tests.Failed("Should have sucessfully failed to connect to any server.")
 	}
 	tests.Passed("Should have sucessfully failed to connect to any server.")
@@ -129,14 +129,14 @@ func TestClientConnectionWithInvalidAuth(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-56",
 		Token:  "auth-4316",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	system := mock.NewServerSystem(octo.AuthCredential{
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -170,7 +170,7 @@ func TestClientConnectionWithInvalidAuth(t *testing.T) {
 
 	defer client.Close()
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err == nil {
+	if err := client.Listen(clientSystem, commando.Parser); err == nil {
 		tests.Failed("Should have successfully failed to connect to udp server with invalid credentials: %+q.", err)
 	}
 	tests.Passed("Should have successfully failed to connect to udp server with invalid credentials.")
@@ -186,14 +186,14 @@ func TestClientConnectionWithoutAuth(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	system := mock.NewServerSystem(octo.AuthCredential{
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -221,13 +221,13 @@ func TestClientConnectionWithoutAuth(t *testing.T) {
 	})
 
 	if err != nil {
-		tests.Failed("Should have successfully connected to udp server: %+q.", err)
+		tests.Failed("Should have successfully preapred udp client: %+q.", err)
 	}
-	tests.Passed("Should have successfully connected to udp server.")
+	tests.Passed("Should have successfully prepared udp client.")
 
 	defer client.Close()
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err != nil {
+	if err := client.Listen(clientSystem, commando.Parser); err != nil {
 		tests.Failed("Should have successfully failed to connect to udp server with client: %+q.", err)
 	}
 	tests.Passed("Should have successfully failed to connect to udp server with client.")
@@ -243,14 +243,14 @@ func TestClientConnectionWithAuth(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	system := mock.NewServerSystem(octo.AuthCredential{
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -284,12 +284,12 @@ func TestClientConnectionWithAuth(t *testing.T) {
 
 	defer client.Close()
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err != nil {
+	if err := client.Listen(clientSystem, commando.Parser); err != nil {
 		tests.Failed("Should have successfully connected to udp server with client: %+q.", err)
 	}
 	tests.Passed("Should have successfully connected to udp server with client.")
 
-	cmdData, _, err := utils.NewCommandByte(consts.ContactRequest, nil)
+	cmdData := commando.NewCommand(string(consts.ContactRequest))
 	if err != nil {
 		tests.Failed("Should have successfully created command request: %+q.", err)
 	}

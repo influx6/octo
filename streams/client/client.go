@@ -12,7 +12,7 @@ type Stream interface {
 // Server defines a interface which exposes a method to handle/process a giving
 // byte slice and recieves the core pipe for response.
 type Server interface {
-	Serve([]byte, Stream) error
+	Serve(interface{}, Stream) error
 }
 
 // SystemServer defines a interface which exposes its credentials and servicing

@@ -19,6 +19,8 @@ func (jsonparser) Encode(msg interface{}) ([]byte, error) {
 	}
 
 	switch item := msg.(type) {
+	case AuthMessage:
+		return json.Marshal(item)
 	case CommandMessage:
 		return json.Marshal([]CommandMessage{item})
 	case []CommandMessage:

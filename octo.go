@@ -46,6 +46,7 @@ const (
 // Event defines a struct which holds details pertaining to specific event.
 type Event struct {
 	Time       time.Time              `json:"time"`
+	Sensor     string                 `json:"sensor"`
 	Token      string                 `json:"token"`
 	Type       EventType              `json:"type"`
 	Data       interface{}            `json:"data"`

@@ -35,24 +35,26 @@ func (c *ClientSystem) Credential() octo.AuthCredential {
 
 // Serve handles the processing of different requests coming from the outside.
 func (c *ClientSystem) Serve(message interface{}, tx client.Stream) error {
-	command, ok := message.(jsoni.CommandMessage)
+	commands, ok := message.([]jsoni.CommandMessage)
 	if !ok {
 		return consts.ErrUnsupportedFormat
 	}
 
-	switch command.Name {
-	case string(consts.ContactRequest):
-		defer c.wg.Done()
-		if err := tx.Send([]byte("OK"), true); err != nil {
-			return err
-		}
+	for _, command := range commands {
+		switch command.Name {
+		case string(consts.ContactRequest):
+			defer c.wg.Done()
+			if err := tx.Send([]byte("OK"), true); err != nil {
+				return err
+			}
 
-		return nil
-	default:
-		break
+			return nil
+		default:
+			return errors.New("Invalid Command")
+		}
 	}
 
-	return errors.New("Invalid Command")
+	return nil
 }
 
 //==============================================================================================================
@@ -84,7 +86,7 @@ func (c *CallbackClientSystem) Credential() octo.AuthCredential {
 
 // Serve handles the processing of different requests coming from the outside.
 func (c *CallbackClientSystem) Serve(message interface{}, tx client.Stream) error {
-	command, ok := message.(jsoni.CommandMessage)
+	commands, ok := message.([]jsoni.CommandMessage)
 	if !ok {
 		return consts.ErrUnsupportedFormat
 	}
@@ -92,5 +94,11 @@ func (c *CallbackClientSystem) Serve(message interface{}, tx client.Stream) erro
 	c.wg.Add(1)
 	defer c.wg.Done()
 
-	return c.cb(command, tx)
+	for _, command := range commands {
+		if err := c.cb(command, tx); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

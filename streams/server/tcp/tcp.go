@@ -299,6 +299,16 @@ func (c *Client) acceptRequests() {
 		c.conn.SetWriteDeadline(time.Now().Add(consts.WriteTimeout))
 
 		n, err := c.conn.Read(block)
+		c.instruments.NotifyEvent(octo.Event{
+			Type:       octo.DataRead,
+			Client:     c.info.UUID,
+			Server:     c.info.SUUID,
+			LocalAddr:  c.info.Local,
+			RemoteAddr: c.info.Remote,
+			Data:       octo.NewDataInstrument(block[:n], err),
+			Details:    map[string]interface{}{},
+		})
+
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
@@ -320,15 +330,8 @@ func (c *Client) acceptRequests() {
 			break
 		}
 
-		c.instruments.NotifyEvent(octo.Event{
-			Type:       octo.DataRead,
-			Client:     c.info.UUID,
-			Server:     c.info.SUUID,
-			LocalAddr:  c.info.Local,
-			RemoteAddr: c.info.Remote,
-			Data:       octo.NewDataInstrument(block[:n], nil),
-			Details:    map[string]interface{}{},
-		})
+		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "tcp.Client.acceptRequests", "Started : %+s", block[:n])
+		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "tcp.Client.acceptRequests", "Completed")
 
 		if c.shouldClose() {
 			block = nil
@@ -381,22 +384,15 @@ func (c *Client) handleRequest(data []byte, tx server.Stream) error {
 func (c *Client) initClusterNegotiation() error {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Cluster Negotiation")
 
-	block := make([]byte, consts.MinDataSize)
-
 	c.Send(commando.WrapResponseBlock(consts.ClusterRequest, nil), true)
 
-	dataLen, err := c.conn.Read(block)
+	block, err := c.temporaryRead()
 	if err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 		return err
 	}
 
-	if dataLen == 0 {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s", ErrInvalidResponse)
-		return ErrInvalidResponse
-	}
-
-	msgs, err := commando.Parser.Decode(block[:dataLen])
+	msgs, err := commando.Parser.Decode(block)
 	if err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initClusterNegotiation", "Client Negotiation : Initialization Failed : %s", err)
 		return err
@@ -695,20 +691,13 @@ func (c *Client) initAuthNegotiation() error {
 
 	c.Send(commando.WrapResponseBlock(consts.AuthRequest, nil), true)
 
-	block := make([]byte, consts.MinDataSize)
-
-	dataLen, err := c.conn.Read(block)
+	block, err := c.temporaryRead()
 	if err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", err)
 		return err
 	}
 
-	if dataLen == 0 {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", ErrInvalidResponse)
-		return ErrInvalidResponse
-	}
-
-	msgs, err := commando.Parser.Decode(block[:dataLen])
+	msgs, err := commando.Parser.Decode(block)
 	if err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", err)
 		return err
@@ -764,6 +753,9 @@ func (c *Client) temporaryRead() ([]byte, error) {
 
 		c.pl.Lock()
 		dataLen, err := c.conn.Read(block)
+		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "tcp.Client.temporaryRead", "Started : %+q", block[:dataLen])
+		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "tcp.Client.temporaryRead", "Completed")
+
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.temporaryRead", "Client Negotiation : ReadTimeout")

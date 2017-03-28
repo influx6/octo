@@ -1,4 +1,4 @@
-package chttp_test
+package http_test
 
 import (
 	"errors"
@@ -8,12 +8,13 @@ import (
 
 	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/goclient"
-	"github.com/influx6/octo/clients/goclient/chttp"
 	"github.com/influx6/octo/instruments"
+	"github.com/influx6/octo/messages/jsoni"
 	"github.com/influx6/octo/mock"
-	"github.com/influx6/octo/transmission"
-	"github.com/influx6/octo/transmission/httpbasic"
+	"github.com/influx6/octo/streams/client"
+	"github.com/influx6/octo/streams/client/http"
+	"github.com/influx6/octo/streams/server"
+	httpbasic "github.com/influx6/octo/streams/server/http"
 	"github.com/influx6/octo/utils"
 )
 
@@ -21,26 +22,27 @@ func TestHTTPPod(t *testing.T) {
 	t.Logf("Given a need to connect to a http server using octo")
 	{
 		insts := instruments.Instruments(mock.NewTestLogger(), nil)
+
 		serverSystem := mock.NewServerCommandSystem(octo.AuthCredential{
 			Scheme: "XBot",
 			Key:    "api-32",
 			Token:  "auth-4531",
-			Data:   []byte("BOMTx"),
+			Data:   "BOMTx",
 		})
 
 		clientSystem := mock.NewCallbackClientSystem(octo.AuthCredential{
 			Scheme: "XBot",
 			Key:    "api-32",
 			Token:  "auth-4531",
-			Data:   []byte("BOMTx"),
-		}, func(command octo.Command, tx goclient.Stream) error {
-			switch string(command.Name) {
+			Data:   "BOMTx",
+		}, func(command jsoni.CommandMessage, tx client.Stream) error {
+			switch command.Name {
 			case "RUMP":
 				tests.Passed("Should have successfully recieved expected response")
-				return tx.Send(octo.Command{Name: []byte("REX")}, true)
+				return tx.Send(jsoni.CommandMessage{Name: "REX"}, true)
 			case "DEX":
 				tests.Passed("Should have successfully recieved expected response")
-				return tx.Send(octo.Command{Name: []byte("INFO")}, true)
+				return tx.Send(jsoni.CommandMessage{Name: "INFO"}, true)
 			case "INFORES":
 				tests.Passed("Should have successfully recieved expected response")
 				return nil
@@ -56,7 +58,7 @@ func TestHTTPPod(t *testing.T) {
 			Scheme: "XBot",
 			Key:    "api-32",
 			Token:  "auth-4531",
-			Data:   []byte("BOMTx"),
+			Data:   ("BOMTx"),
 		})
 
 		httpMux := newBasicServeHTTP(true, pocket, serverSystem)
@@ -65,7 +67,7 @@ func TestHTTPPod(t *testing.T) {
 
 		t.Logf("\tWhen provided a system for handling request")
 		{
-			client, err := chttp.New(insts, chttp.Attr{
+			client, err := http.New(insts, http.Attr{
 				Authenticate: true,
 				Addr:         serverURL,
 				Headers: map[string]string{
@@ -86,20 +88,20 @@ func TestHTTPPod(t *testing.T) {
 				fmt.Printf("Disconnect Contact: %#v\n", c)
 			})
 
-			if err := client.Listen(clientSystem, mock.CommandEncoding{}); err != nil {
+			if err := client.Listen(clientSystem, jsoni.Parser); err != nil {
 				tests.Failed("Should have successfully listened for connection to http server: %+q.", err)
 			}
 			tests.Passed("Should have successfully listened for connection to http server.")
 
-			if err := client.Send(octo.Command{
-				Name: []byte("PUMP"),
+			if err := client.Send(jsoni.CommandMessage{
+				Name: ("PUMP"),
 			}, true); err != nil {
 				tests.Failed("Should have successfully delivered command to server: %+q.", err)
 			}
 			tests.Passed("Should have successfully delivered command to server.")
 
-			if err := client.Send(octo.Command{
-				Name: []byte("GLOP"),
+			if err := client.Send(jsoni.CommandMessage{
+				Name: ("GLOP"),
 			}, true); err == nil {
 				tests.Failed("Should have successfully failed to process command to server: %+q.", err)
 			}
@@ -111,7 +113,7 @@ func TestHTTPPod(t *testing.T) {
 	}
 }
 
-func newBasicServeHTTP(authenticate bool, cred octo.Credentials, system transmission.System) *httpbasic.BasicServeHTTP {
+func newBasicServeHTTP(authenticate bool, cred octo.Credentials, system server.System) *httpbasic.BasicServeHTTP {
 	return httpbasic.NewBasicServeHTTP(
 		authenticate,
 		instruments.Instruments(mock.NewTestLogger(), nil),

@@ -5,12 +5,12 @@ import (
 
 	"github.com/influx6/faux/tests"
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/goclient/tcpclient"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/instruments"
+	"github.com/influx6/octo/messages/commando"
 	"github.com/influx6/octo/mock"
-	"github.com/influx6/octo/parsers/byteutils"
-	"github.com/influx6/octo/transmission/tcp"
+	"github.com/influx6/octo/streams/client/tcpclient"
+	"github.com/influx6/octo/streams/server/tcp"
 )
 
 func TestClientConnectionWithBadServers(t *testing.T) {
@@ -18,7 +18,7 @@ func TestClientConnectionWithBadServers(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -27,7 +27,7 @@ func TestClientConnectionWithBadServers(t *testing.T) {
 		Addr: ":7040",
 	})
 
-	err := client.Listen(clientSystem, mock.CommandEncoding{})
+	err := client.Listen(clientSystem, commando.Parser)
 	if err == nil {
 		tests.Failed("Should have successfully failed to connect to tcp server.")
 	}
@@ -39,7 +39,7 @@ func TestClientConnectionWithNoServers(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -48,7 +48,7 @@ func TestClientConnectionWithNoServers(t *testing.T) {
 		Addr: "",
 	})
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err == nil {
+	if err := client.Listen(clientSystem, commando.Parser); err == nil {
 		tests.Failed("Should have successfully failed to connect to tcp server.")
 	}
 	tests.Passed("Should have successfully failed to connect to tcp server.")
@@ -61,14 +61,14 @@ func TestClientConnectionWithoutAuth(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	system := mock.NewServerSystem(octo.AuthCredential{
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -95,7 +95,7 @@ func TestClientConnectionWithoutAuth(t *testing.T) {
 
 	defer client.Close()
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err != nil {
+	if err := client.Listen(clientSystem, commando.Parser); err != nil {
 		tests.Failed("Should have successfully connected to tcp server with client: %+q.", err)
 	}
 	tests.Passed("Should have successfully connected to tcp server with client.")
@@ -109,14 +109,14 @@ func TestClientConnectionWithAuth(t *testing.T) {
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	system := mock.NewServerSystem(octo.AuthCredential{
 		Scheme: "XBot",
 		Key:    "api-32",
 		Token:  "auth-4531",
-		Data:   []byte("BOMTx"),
+		Data:   "BOMTx",
 	})
 
 	inst := instruments.Instruments(mock.NewTestLogger(), nil)
@@ -140,12 +140,12 @@ func TestClientConnectionWithAuth(t *testing.T) {
 
 	defer client.Close()
 
-	if err := client.Listen(clientSystem, mock.CommandEncoding{}); err != nil {
+	if err := client.Listen(clientSystem, commando.Parser); err != nil {
 		tests.Failed("Should have successfully connected to tcp server with client: %+q.", err)
 	}
 	tests.Passed("Should have successfully connected to tcp server with client.")
 
-	cmdData := byteutils.MakeByteMessage(consts.ContactRequest, nil)
+	cmdData := commando.NewCommand(string(consts.ContactRequest))
 	if err := client.Send(cmdData, true); err != nil {
 		tests.Failed("Should have successfully delivered command to server: %+q.", err)
 	}

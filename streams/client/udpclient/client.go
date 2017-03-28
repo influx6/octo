@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/goclient"
 	"github.com/influx6/octo/consts"
+	"github.com/influx6/octo/messages/jsoni"
 	"github.com/influx6/octo/netutils"
-	"github.com/influx6/octo/parsers/jsonparser"
+	"github.com/influx6/octo/streams/client"
 	"github.com/influx6/octo/utils"
 )
 
@@ -52,8 +52,8 @@ type UDPPod struct {
 	curAddr     *srvAddr
 	bm          bytes.Buffer
 	wg          sync.WaitGroup
-	system      goclient.System
-	encoding    goclient.MessageEncoding
+	system      client.SystemServer
+	encoding    octo.MessageEncoding
 	cnl         sync.Mutex
 	doClose     bool
 	started     bool
@@ -96,7 +96,7 @@ func New(insts octo.Instrumentation, attr Attr) (*UDPPod, error) {
 }
 
 // Listen calls the connection to be create and begins serving requests.
-func (w *UDPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) error {
+func (w *UDPPod) Listen(sm client.SystemServer, encoding octo.MessageEncoding) error {
 	w.cnl.Lock()
 	if w.started {
 		w.cnl.Unlock()
@@ -164,6 +164,7 @@ func (w *UDPPod) notify(n octo.StateHandlerType, err error) {
 
 // SendWithAddr delivers the giving message to the underline websocket connection.
 func (w *UDPPod) SendWithAddr(addr *net.UDPAddr, data interface{}, flush bool) error {
+
 	// Encode outside of lock to reduce contention.
 	dataBytes, err := w.encoding.Encode(data)
 	if err != nil {
@@ -396,13 +397,11 @@ func (w *UDPPod) initConnectionSetup() error {
 	// Attempt to negotiate authentication with server, we wont allow multiple
 	// messages but only handle one request and if it does not match then fail.
 	{
-		credentialData, err := utils.AuthCredentialToJSON(w.system.Credential())
-		if err != nil {
-			return err
-		}
+		cmdData, err := jsoni.Parser.Encode(jsoni.AuthMessage{
+			Name: string(consts.AuthResponse),
+			Data: w.system.Credential(),
+		})
 
-		// cmdData, _, err := utils.NewCommandByte(consts.AuthResponse, credentialData)
-		cmdData, _, err := utils.NewCommandByte(consts.AuthResponse, credentialData)
 		if err != nil {
 			return err
 		}
@@ -420,18 +419,22 @@ func (w *UDPPod) initConnectionSetup() error {
 			return err
 		}
 
-		cmds, err := jsonparser.JSON.Parse(data)
+		cmds, err := jsoni.Parser.Decode(data)
 		if err != nil {
 			return err
 		}
 
-		if len(cmds) == 0 {
+		commands, ok := cmds.([]jsoni.CommandMessage)
+		if !ok {
 			return consts.ErrParseError
 		}
 
-		cmd := cmds[0]
+		if len(commands) == 0 {
+			return consts.ErrEmptyMessage
+		}
 
-		if !bytes.Equal(cmd.Name, consts.AuthroizationGranted) {
+		cmd := commands[0]
+		if cmd.Name != string(consts.AuthroizationGranted) {
 			return consts.ErrAuthorizationFailed
 		}
 	}

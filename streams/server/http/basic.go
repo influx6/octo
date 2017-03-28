@@ -242,6 +242,9 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.instruments.Log(octo.LOGTRANSMITTED, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Started : %+q", data.Bytes())
+	s.instruments.Log(octo.LOGTRANSMITTED, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Completed")
+
 	if err := s.primary.Serve(data.Bytes(), &basic); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		s.instruments.Log(octo.LOGERROR, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "BasicServer System : Error : %+s", err)

@@ -11,11 +11,10 @@ import (
 	"time"
 
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/goclient"
 	"github.com/influx6/octo/consts"
+	"github.com/influx6/octo/messages/commando"
 	"github.com/influx6/octo/netutils"
-	"github.com/influx6/octo/parsers/blockparser"
-	"github.com/influx6/octo/parsers/byteutils"
+	"github.com/influx6/octo/streams/client"
 	"github.com/influx6/octo/utils"
 )
 
@@ -40,9 +39,9 @@ type TCPPod struct {
 	curAddr     *srvAddr
 	bm          bytes.Buffer
 	wg          sync.WaitGroup
-	system      goclient.System
-	encoding    goclient.MessageEncoding
-	base        *goclient.BaseSystem
+	system      client.SystemServer
+	encoding    octo.MessageEncoding
+	base        *commando.CxConversations
 	cnl         sync.Mutex
 	doClose     bool
 	started     bool
@@ -71,7 +70,7 @@ func New(insts octo.Instrumentation, attr Attr) *TCPPod {
 }
 
 // Listen calls the connection to be create and begins serving requests.
-func (w *TCPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) error {
+func (w *TCPPod) Listen(sm client.SystemServer, encoding octo.MessageEncoding) error {
 	w.cnl.Lock()
 	if w.started {
 		w.cnl.Unlock()
@@ -82,7 +81,7 @@ func (w *TCPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) e
 	w.system = sm
 	w.encoding = encoding
 
-	// w.base = goclient.NewBaseSystem(
+	// w.base = client.NewBaseSystem(
 	// 	blockparser.Blocks,
 	// 	w.instruments,
 	// 	blocksystem.BaseHandlers(),
@@ -358,18 +357,19 @@ func (w *TCPPod) initConnectionSetup() error {
 			return err
 		}
 
-		cmds, err := blockparser.Blocks.Parse(data)
+		cmds, err := commando.Parser.Decode(data)
 		if err != nil {
 			return err
 		}
 
-		if len(cmds) == 0 {
+		commands, ok := cmds.([]commando.CommandMessage)
+		if !ok {
 			return consts.ErrParseError
 		}
 
-		cmd := cmds[0]
+		cmd := commands[0]
 
-		if !bytes.Equal(cmd.Name, consts.AuthRequest) {
+		if cmd.Name != string(consts.AuthRequest) {
 			return consts.ErrInvalidRequestForState
 		}
 
@@ -378,9 +378,7 @@ func (w *TCPPod) initConnectionSetup() error {
 			return err
 		}
 
-		// cmdData, _, err := utils.NewCommandByte(consts.AuthResponse, credentialData)
-		cmdData := byteutils.MakeByteMessage(consts.AuthResponse, credentialData)
-
+		cmdData := commando.MakeByteMessage(consts.AuthResponse, credentialData)
 		if err := w.conn.Write(cmdData, true); err != nil {
 			return err
 		}
@@ -394,18 +392,19 @@ func (w *TCPPod) initConnectionSetup() error {
 			return err
 		}
 
-		cmds, err := blockparser.Blocks.Parse(data)
+		cmds, err := commando.Parser.Decode(data)
 		if err != nil {
 			return err
 		}
 
-		if len(cmds) == 0 {
+		commands, ok := cmds.([]commando.CommandMessage)
+		if !ok {
 			return consts.ErrParseError
 		}
 
-		cmd := cmds[0]
+		cmd := commands[0]
 
-		if !bytes.Equal(cmd.Name, consts.AuthroizationGranted) {
+		if cmd.Name != string(consts.AuthroizationGranted) {
 			return consts.ErrAuthorizationFailed
 		}
 	}

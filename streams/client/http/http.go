@@ -1,4 +1,4 @@
-package chttp
+package http
 
 import (
 	"bytes"
@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/influx6/octo"
-	"github.com/influx6/octo/clients/goclient"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
+	"github.com/influx6/octo/streams/client"
 	"github.com/influx6/octo/utils"
 )
 
@@ -27,9 +27,9 @@ type Attr struct {
 	Headers      map[string]string
 }
 
-// HTTPPod defines a http implementation which connects
+// ClientPod defines a http implementation which connects
 // to a provided http endpoint for making requests.
-type HTTPPod struct {
+type ClientPod struct {
 	attr        Attr
 	instruments octo.Instrumentation
 	pub         *octo.Pub
@@ -37,15 +37,15 @@ type HTTPPod struct {
 	curAddr     *srvAddr
 	bm          bytes.Buffer
 	wg          sync.WaitGroup
-	system      goclient.System
-	encoding    goclient.MessageEncoding
+	system      client.SystemServer
+	encoding    octo.MessageEncoding
 	cnl         sync.Mutex
 	doClose     bool
 	started     bool
 }
 
 // New returns a new instance of the http pod.
-func New(insts octo.Instrumentation, attr Attr) (*HTTPPod, error) {
+func New(insts octo.Instrumentation, attr Attr) (*ClientPod, error) {
 	if attr.MaxDrops <= 0 {
 		attr.MaxDrops = consts.MaxTotalConnectionFailure
 	}
@@ -54,7 +54,7 @@ func New(insts octo.Instrumentation, attr Attr) (*HTTPPod, error) {
 		attr.MaxReconnets = consts.MaxTotalReconnection
 	}
 
-	var pod HTTPPod
+	var pod ClientPod
 	pod.attr = attr
 	pod.instruments = insts
 	pod.pub = octo.NewPub()
@@ -68,7 +68,7 @@ func New(insts octo.Instrumentation, attr Attr) (*HTTPPod, error) {
 }
 
 // Listen calls the connection to be create and begins serving requests.
-func (w *HTTPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) error {
+func (w *ClientPod) Listen(sm client.SystemServer, encoding octo.MessageEncoding) error {
 	w.cnl.Lock()
 	if w.started {
 		w.cnl.Unlock()
@@ -87,7 +87,7 @@ func (w *HTTPPod) Listen(sm goclient.System, encoding goclient.MessageEncoding) 
 }
 
 // Close closes the http connection.
-func (w *HTTPPod) Close() error {
+func (w *ClientPod) Close() error {
 	if w.isClosed() {
 		return consts.ErrClosedConnection
 	}
@@ -105,12 +105,12 @@ func (w *HTTPPod) Close() error {
 }
 
 // Register registers the handler for a given handler.
-func (w *HTTPPod) Register(tm octo.StateHandlerType, hmi interface{}) {
+func (w *ClientPod) Register(tm octo.StateHandlerType, hmi interface{}) {
 	w.pub.Register(tm, hmi)
 }
 
 // notify calls the giving callbacks for each different type of state.
-func (w *HTTPPod) notify(n octo.StateHandlerType, err error) {
+func (w *ClientPod) notify(n octo.StateHandlerType, err error) {
 	var cm octo.Contact
 
 	if w.curAddr != nil {
@@ -123,7 +123,7 @@ func (w *HTTPPod) notify(n octo.StateHandlerType, err error) {
 // Send delivers the giving message to the underline http connection.
 // HTTP does not supported buffering, hence buffer if required must be done by the
 // user and then passed in. The flush bool is not functional.
-func (w *HTTPPod) Send(data interface{}, _ bool) error {
+func (w *ClientPod) Send(data interface{}, _ bool) error {
 	if !w.isStarted() {
 		return consts.ErrRequestUnsearvable
 	}
@@ -137,7 +137,7 @@ func (w *HTTPPod) Send(data interface{}, _ bool) error {
 	return w.do(bytes.NewBuffer(dataBytes))
 }
 
-func (w *HTTPPod) do(bu *bytes.Buffer) error {
+func (w *ClientPod) do(bu *bytes.Buffer) error {
 	var url string
 
 	w.cnl.Lock()
@@ -156,7 +156,7 @@ func (w *HTTPPod) do(bu *bytes.Buffer) error {
 	}
 
 	cred := w.system.Credential()
-	req.Header.Set("Authorization", fmt.Sprintf("%s %s:%s:%s", cred.Scheme, cred.Key, cred.Token, string(cred.Data)))
+	req.Header.Set("Authorization", fmt.Sprintf("%s %s:%s:%s", cred.Scheme, cred.Key, cred.Token, cred.Data))
 
 	var client http.Client
 	client.Transport = &http.Transport{MaxIdleConnsPerHost: 5}
@@ -205,7 +205,7 @@ type srvAddr struct {
 
 // prepareServers registered all provided address from the attribute as cycling
 // items in a server lists for reducing load on a new server.
-func (w *HTTPPod) prepareServers() error {
+func (w *ClientPod) prepareServers() error {
 
 	// Add the main addr if provided.
 	if w.attr.Addr != "" {
@@ -250,7 +250,7 @@ func (w *HTTPPod) prepareServers() error {
 
 // getNextServer gets the next server in the lists setting it as the main server
 // if the giving server has not reach the maximumum reconnection limit.
-func (w *HTTPPod) getNextServer() error {
+func (w *ClientPod) getNextServer() error {
 	var indx int
 	var chosen *srvAddr
 
@@ -294,7 +294,7 @@ func (w *HTTPPod) getNextServer() error {
 
 // isStarted returns true/false if the giving http handler has started and has
 // provided the system and encoder for the httppod.
-func (w *HTTPPod) isStarted() bool {
+func (w *ClientPod) isStarted() bool {
 	w.cnl.Lock()
 	if w.started {
 		w.cnl.Unlock()
@@ -306,7 +306,7 @@ func (w *HTTPPod) isStarted() bool {
 }
 
 // isClosed returns true/false if the connection is closed or expected to be closed.
-func (w *HTTPPod) isClosed() bool {
+func (w *ClientPod) isClosed() bool {
 	w.cnl.Lock()
 	if w.doClose {
 		w.cnl.Unlock()
@@ -319,7 +319,7 @@ func (w *HTTPPod) isClosed() bool {
 
 // reconnect attempts to retrieve a new server after a failure to connect and then
 // begins message passing.
-func (w *HTTPPod) reconnect() error {
+func (w *ClientPod) reconnect() error {
 	if w.system == nil {
 		return consts.ErrNoSystemProvided
 	}
