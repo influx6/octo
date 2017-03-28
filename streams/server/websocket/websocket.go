@@ -20,9 +20,11 @@ import (
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/netutils"
-	"github.com/influx6/octo/parsers/jsonparser"
-	"github.com/influx6/octo/transmission"
-	"github.com/influx6/octo/transmission/systems/jsonsystem"
+
+	"github.com/influx6/octo/messages/jsoni"
+	jsoniserver "github.com/influx6/octo/messages/jsoni/server"
+	"github.com/influx6/octo/streams/server"
+
 	"github.com/influx6/octo/utils"
 	uuid "github.com/satori/go.uuid"
 )
@@ -91,7 +93,7 @@ func New(instruments octo.Instrumentation, attr SocketAttr) *SocketServer {
 }
 
 // Listen begins the initialization of the websocket server.
-func (s *SocketServer) Listen(system transmission.System) error {
+func (s *SocketServer) Listen(system server.System) error {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.Listen", "Started : Addr[%q]", s.Attr.Addr)
 
 	if s.isRunning() {
@@ -218,29 +220,25 @@ type BaseSocketServer struct {
 	Attr               BaseSocketAttr
 	instruments        octo.Instrumentation
 	info               octo.Contact
-	system             transmission.System
-	base               *transmission.BaseSystem
+	base               *jsoni.SxConversations
+	auth               octo.Authenticator
 	upgrader           websocket.Upgrader
 	cl                 sync.Mutex
 	clients            map[string]*Client
 }
 
 // NewBaseSocketServer returns a new instance of a BaseSocketServer.
-func NewBaseSocketServer(instruments octo.Instrumentation, attr BaseSocketAttr, info octo.Contact, credentials octo.Credentials, system transmission.System) *BaseSocketServer {
+func NewBaseSocketServer(instruments octo.Instrumentation, attr BaseSocketAttr, info octo.Contact, credentials octo.Credentials, system server.System) *BaseSocketServer {
 	var base BaseSocketServer
-	base.clients = make(map[string]*Client)
-	base.instruments = instruments
 	base.Attr = attr
 	base.info = info
-	base.system = system
+	base.instruments = instruments
+	base.clients = make(map[string]*Client)
 
-	base.base = transmission.NewBaseSystem(
-		system,
-		jsonparser.JSON,
-		instruments,
-		jsonsystem.BaseHandlers(),
-		jsonsystem.AuthHandlers(credentials, system),
-	)
+	base.auth = system
+	base.base = jsoni.NewSxConversations(system, &jsoniserver.ContactServer{}, &jsoniserver.ConversationServer{}, &jsoniserver.AuthServer{
+		Credentials: credentials,
+	})
 
 	base.upgrader = websocket.Upgrader{
 		ReadBufferSize:    consts.MaxBufferSize,
@@ -298,8 +296,8 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client.server = s
 	client.instruments = s.instruments
 	client.Request = r
-	client.system = s.system
-	client.primary = s.base
+	client.auth = s.auth
+	client.base = s.base
 	client.info = octo.Contact{
 		UUID:   cuuid,
 		SUUID:  s.info.SUUID,
@@ -340,8 +338,8 @@ type Client struct {
 	Request       *http.Request
 	instruments   octo.Instrumentation
 	info          octo.Contact
-	system        transmission.System
-	primary       *transmission.BaseSystem
+	base          *jsoni.SxConversations
+	auth          octo.Authenticator
 	wg            sync.WaitGroup
 	sg            sync.WaitGroup
 	server        *BaseSocketServer
@@ -379,23 +377,25 @@ func (c *Client) authorizationByRequest() error {
 		return nil
 	}
 
-	var cmd octo.Command
+	var buf []byte
+	var err error
+
+	var cmd jsoni.CommandMessage
 	cmd.Name = string(consts.AuthRequest)
 
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(cmd); err != nil {
+	if buf, err = jsoni.Parser.Encode(cmd); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Error : %q", err.Error())
 		return nil
 	}
 
-	if err := c.Send(buf.Bytes(), true); err != nil {
+	if err := c.Send(buf, true); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Error : %q", err.Error())
 		return nil
 	}
 
 	{
 
-		var authResponse octo.Command
+		var authResponse jsoni.AuthMessage
 		var messageType int
 		var message []byte
 
@@ -440,33 +440,27 @@ func (c *Client) authorizationByRequest() error {
 			return err
 		}
 
-		var credential octo.AuthCredential
-
-		if merr := json.NewDecoder(bytes.NewBuffer(bytes.Join(authResponse.Data, consts.Empty))).Decode(&credential); merr != nil {
+		if merr := c.auth.Authenticate(authResponse.Data); merr != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", merr.Error())
-			return merr
-		}
 
-		if merr := c.system.Authenticate(credential); merr != nil {
-			cmd, _, _ := utils.NewCommandByte(consts.AuthroizationDenied)
-
-			if serr := c.Send(cmd, true); serr != nil {
-				c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Failed to deliver denied message :  %+q", serr.Error())
+			if block, cerr := jsoni.Parser.Encode(jsoni.CommandMessage{
+				Name: string(consts.AuthroizationDenied),
+				Data: []byte(merr.Error()),
+			}); cerr == nil {
+				if serr := c.Send(block, true); serr != nil {
+					c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Failed to deliver denied message :  %+q", serr.Error())
+				}
 			}
 
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", merr.Error())
 			return merr
 		}
 
-		cmd, _, cerr := utils.NewCommandByte(consts.AuthroizationGranted)
-		if cerr != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", cerr.Error())
-			return cerr
-		}
-
-		if merr := c.Send(cmd, true); merr != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", merr.Error())
-			return merr
+		if block, cerr := jsoni.Parser.Encode(jsoni.CommandMessage{
+			Name: string(consts.AuthroizationGranted),
+		}); cerr == nil {
+			if serr := c.Send(block, true); serr != nil {
+				c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", serr.Error())
+			}
 		}
 
 		c.authenticated = true
@@ -498,7 +492,7 @@ func (c *Client) authorizationByHeader() error {
 		return err
 	}
 
-	if err := c.system.Authenticate(credentials); err != nil {
+	if err := c.auth.Authenticate(credentials); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByHeader", "Completed : Error : %+q", err)
 		return err
 	}
@@ -554,6 +548,16 @@ func (c *Client) Send(data []byte, flush bool) error {
 	err := c.Conn.WriteMessage(websocket.BinaryMessage, data)
 	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "websocket.Client.Send", "Completed")
 
+	c.instruments.NotifyEvent(octo.Event{
+		Type:       octo.DataWrite,
+		Client:     c.info.UUID,
+		Server:     c.info.SUUID,
+		LocalAddr:  c.info.Local,
+		RemoteAddr: c.info.Remote,
+		Data:       octo.NewDataInstrument(data, err),
+		Details:    map[string]interface{}{},
+	})
+
 	if err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Send", "Started : %q : Error : %s", c.info.UUID, err.Error())
 		return err
@@ -595,8 +599,8 @@ func (c *Client) Close() error {
 func (c *Client) Listen() error {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Listen", "Start : %#v", c.info)
 
-	if c.system == nil || c.primary == nil {
-		err := errors.New("Client system/Primary systems are not set")
+	if c.base == nil {
+		err := errors.New("Client system is not set")
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Listen", "Websocket Unable to Listen : Error : %q", err.Error())
 		return err
 	}
@@ -664,25 +668,12 @@ func (c *Client) acceptRequests() {
 		tx.ctx = context.New()
 		tx.client = c
 
-		rem, err := c.primary.ServeBase(data, &tx)
-		if err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
-
-			if err := c.system.Serve(data, &tx); err != nil {
-				c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
-				go c.Close()
-				return
-			}
+		if err := c.base.Serve(data, &tx); err != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket System : Fails Serving : Error : %+s", err)
+			go c.Close()
+			return
 		}
 
-		// Handle remaining messages and pass it to user system.
-		if rem != nil {
-			if err := c.system.Serve(rem, &tx); err != nil {
-				c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket Base System : Fails Parsing : Error : %+s", err)
-				go c.Close()
-				return
-			}
-		}
 	}
 
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Completed")

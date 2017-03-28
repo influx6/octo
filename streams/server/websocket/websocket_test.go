@@ -18,16 +18,18 @@ import (
 	"github.com/influx6/octo/instruments"
 	"github.com/influx6/octo/mock"
 	"github.com/influx6/octo/netutils"
-	"github.com/influx6/octo/transmission"
-	"github.com/influx6/octo/transmission/websocket"
 	"github.com/influx6/octo/utils"
+
+	"github.com/influx6/octo/messages/jsoni"
+	"github.com/influx6/octo/streams/server"
+	"github.com/influx6/octo/streams/server/websocket"
 )
 
 var (
 	scheme    = "XBot"
 	key       = "api-32"
 	token     = "auth-4531"
-	tokenData = []byte("BOMTx")
+	tokenData = "BOMTx"
 )
 
 type mockSystem struct {
@@ -49,7 +51,7 @@ func (mockSystem) Authenticate(cred octo.AuthCredential) error {
 		return errors.New("Token does not match")
 	}
 
-	if !bytes.Equal(cred.Data, tokenData) {
+	if cred.Data != tokenData {
 		return errors.New("Data  does not match")
 	}
 
@@ -57,8 +59,8 @@ func (mockSystem) Authenticate(cred octo.AuthCredential) error {
 }
 
 // Serve handles the processing of different requests coming from the outside.
-func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
-	var command octo.Command
+func (mockSystem) Serve(message []byte, tx server.Stream) error {
+	var command jsoni.CommandMessage
 
 	if err := json.Unmarshal(message, &command); err != nil {
 		return err
@@ -81,7 +83,7 @@ func (mockSystem) Serve(message []byte, tx transmission.Stream) error {
 func TestWebsocketServer(t *testing.T) {
 	system := &mockSystem{t: t}
 
-	ws := websocket.New(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewTestLogger()}), websocket.SocketAttr{
+	ws := websocket.New(instruments.Instruments(mock.NewTestLogger(), nil), websocket.SocketAttr{
 		Addr:         ":4050",
 		Authenticate: true,
 		Headers: map[string]string{
@@ -138,16 +140,23 @@ func TestWebsocketServer(t *testing.T) {
 
 		defer conn.Close()
 
-		if err := sendMessage(conn, string(consts.ContactRequest)); err != nil {
+		if err := sendMessage(conn, string(consts.ContactRequest), nil); err != nil {
 			tests.Failed("Should have successfully delivered 'INFO' messages: %q.", err.Error())
 		}
 		tests.Passed("Should have successfully delivered 'INFO' messages.")
 
-		var cmd octo.Command
-		if err := conn.ReadJSON(&cmd); err != nil {
+		var cmds []jsoni.CommandMessage
+		if err := conn.ReadJSON(&cmds); err != nil {
 			tests.Failed("Should have successfully connected to read messages: %q.", err.Error())
 		}
 		tests.Passed("Should have successfully connected to read messages.")
+
+		if len(cmds) == 0 {
+			tests.Failed("Should have successfully recieved messages.")
+		}
+		tests.Passed("Should have successfully recieved messages.")
+
+		cmd := cmds[0]
 
 		if cmd.Name != string(consts.ContactResponse) {
 			tests.Failed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
@@ -172,7 +181,7 @@ func TestWebsocketSystem(t *testing.T) {
 	})
 
 	system := &mockSystem{t: t}
-	ws := websocket.NewBaseSocketServer(instruments.Instrument(instruments.InstrumentAttr{Log: mock.NewTestLogger()}), websocket.BaseSocketAttr{
+	ws := websocket.NewBaseSocketServer(instruments.Instruments(mock.NewTestLogger(), nil), websocket.BaseSocketAttr{
 		Authenticate: true,
 	}, utils.NewContact(":6050"), pocket, system)
 
@@ -215,20 +224,24 @@ func TestWebsocketSystem(t *testing.T) {
 		}
 		tests.Passed("Should have successfully received message from server: %+q -> %d.", mdata, mtype)
 
-		cmd, cerr := utils.ToCommand(mdata)
+		cmds, cerr := jsoni.Parser.Decode(mdata)
 		if cerr != nil {
 			conn.Close()
 			tests.Failed("Should have successfully received command type from server: %+q.", cerr.Error())
 		}
 		tests.Passed("Should have successfully received command type from server.")
 
+		cmd := cmds.([]jsoni.CommandMessage)[0]
+
 		if !bytes.Equal([]byte(cmd.Name), consts.AuthRequest) {
 			tests.Failed("Should have successfully received AUTH command request from server.")
 		}
 		tests.Passed("Should have successfully received AUTH command request from server.")
 
-		pocketData, _ := pocket.Bytes()
-		auth, _, aerr := utils.NewCommandByte(consts.AuthResponse, pocketData)
+		auth, aerr := json.Marshal(jsoni.AuthMessage{
+			Name: string(consts.AuthResponse),
+			Data: pocket.Credential(),
+		})
 		if aerr != nil {
 			tests.Failed("Should have successfully created AuthResponse for server.")
 		}
@@ -246,14 +259,16 @@ func TestWebsocketSystem(t *testing.T) {
 		}
 		tests.Passed("Should have successfully received message from server: %+q -> %d.", mdata, mtype)
 
-		cmd, cerr = utils.ToCommand(mdata)
+		cmds, cerr = jsoni.Parser.Decode(mdata)
 		if cerr != nil {
 			conn.Close()
 			tests.Failed("Should have successfully received command type from server: %+q.", cerr.Error())
 		}
 		tests.Passed("Should have successfully received command type from server.")
 
-		if !bytes.Equal([]byte(cmd.Name), consts.AuthroizationGranted) {
+		ncmd := cmds.([]jsoni.CommandMessage)[0]
+
+		if !bytes.Equal([]byte(ncmd.Name), consts.AuthroizationGranted) {
 			tests.Failed("Should have successfully passed AUTH process with server.")
 		}
 		tests.Passed("Should have successfully passsed AUTH process with server.")
@@ -291,16 +306,23 @@ func TestWebsocketSystem(t *testing.T) {
 
 		defer conn.Close()
 
-		if err := sendMessage(conn, string(consts.ContactRequest)); err != nil {
+		if err := sendMessage(conn, string(consts.ContactRequest), nil); err != nil {
 			tests.Failed("Should have successfully delivered 'INFO' messages: %q.", err.Error())
 		}
 		tests.Passed("Should have successfully delivered 'INFO' messages.")
 
-		var cmd octo.Command
-		if err := conn.ReadJSON(&cmd); err != nil {
+		var cmds []jsoni.CommandMessage
+		if err := conn.ReadJSON(&cmds); err != nil {
 			tests.Failed("Should have successfully connected to read messages: %q.", err.Error())
 		}
 		tests.Passed("Should have successfully connected to read messages.")
+
+		if len(cmds) == 0 {
+			tests.Failed("Should have successfully recieved messages.")
+		}
+		tests.Passed("Should have successfully recieved messages.")
+
+		cmd := cmds[0]
 
 		if !bytes.Equal([]byte(cmd.Name), consts.ContactResponse) {
 			tests.Failed("Should have successfully received 'INFORES' response: %+q.", cmd.Name)
@@ -328,10 +350,15 @@ func newWebsocketClient(url string, headers map[string]string) (*gwebsocket.Conn
 }
 
 // sendMessage delivers the giving command to the websoket.
-func sendMessage(conn *gwebsocket.Conn, command string, data ...string) error {
+func sendMessage(conn *gwebsocket.Conn, command string, data interface{}) error {
+	tests.Info("Sending Command: %q Data: %+q", command, data)
+
 	var bu bytes.Buffer
 
-	if err := json.NewEncoder(&bu).Encode(utils.NewCommand(command, data...)); err != nil {
+	if err := json.NewEncoder(&bu).Encode(jsoni.CommandMessage{
+		Name: command,
+		Data: data,
+	}); err != nil {
 		return err
 	}
 

@@ -1,8 +1,6 @@
 package server
 
 import (
-	"encoding/json"
-
 	"github.com/influx6/octo"
 	"github.com/influx6/octo/consts"
 	"github.com/influx6/octo/messages/jsoni"
@@ -125,17 +123,9 @@ func (c ContactServer) CanServe(cmd jsoni.CommandMessage) bool {
 //================================================================================
 
 func sendJSON(tx server.Stream, val interface{}, flush bool) error {
-	var data []byte
-	var err error
-
-	switch item := val.(type) {
-	case []byte:
-		data = item
-	default:
-		data, err = json.Marshal(val)
-		if err != nil {
-			return err
-		}
+	data, err := jsoni.Parser.Encode(val)
+	if err != nil {
+		return err
 	}
 
 	return tx.Send(data, flush)

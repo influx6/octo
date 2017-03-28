@@ -288,6 +288,30 @@ func (s *Server) handleConnections(system server.System) {
 
 	defer s.wg.Done()
 
+	s.instruments.NotifyEvent(octo.Event{
+		Type:       octo.GoroutineOpened,
+		Client:     s.info.UUID,
+		Server:     s.info.SUUID,
+		LocalAddr:  s.info.Local,
+		RemoteAddr: s.info.Remote,
+		Data:       octo.NewGoroutineInstrument(),
+		Details: map[string]interface{}{
+			"Addr": s.info.Addr,
+		},
+	})
+
+	defer s.instruments.NotifyEvent(octo.Event{
+		Type:       octo.GoroutineClosed,
+		Client:     s.info.UUID,
+		Server:     s.info.SUUID,
+		LocalAddr:  s.info.Local,
+		RemoteAddr: s.info.Remote,
+		Data:       octo.NewGoroutineInstrument(),
+		Details: map[string]interface{}{
+			"Addr": s.info.Addr,
+		},
+	})
+
 	block := make([]byte, consts.MinDataSize)
 
 	for s.IsRunning() {
@@ -454,6 +478,16 @@ func (c *Client) Send(data []byte, flush bool) error {
 	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Started : %q", string(data))
 	_, err := c.conn.WriteToUDP(data, c.addr)
 	c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "udp.Client.Send", "Ended")
+
+	c.instruments.NotifyEvent(octo.Event{
+		Type:       octo.DataWrite,
+		Client:     c.info.UUID,
+		Server:     c.info.SUUID,
+		LocalAddr:  c.info.Local,
+		RemoteAddr: c.info.Remote,
+		Data:       octo.NewDataInstrument(data, err),
+		Details:    map[string]interface{}{},
+	})
 
 	if err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "udp.Client.Send", "Completed : %s", err.Error())
