@@ -684,6 +684,7 @@ func (c *Client) acceptRequests() {
 		if err != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.acceptRequests", "Error : %q", err.Error())
 
+			c.Conn.WriteMessage(websocket.CloseMessage, nil)
 			// if err == io.EOF || err == websocket.ErrBadHandshake || err == websocket.ErrCloseSent {
 			// 	go c.Close()
 			// 	break
@@ -716,6 +717,9 @@ func (c *Client) acceptRequests() {
 
 		if err := c.base.Serve(data, &tx); err != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket System : Fails Serving : Error : %+s", err)
+
+			// Send Close message.
+			c.Conn.WriteMessage(websocket.CloseMessage, nil)
 
 			// Close connection
 			go c.Close()
