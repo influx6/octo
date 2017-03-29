@@ -132,7 +132,7 @@ func (c *Client) Close() error {
 
 	close(c.closer)
 
-	c.sg.Wait()
+	// c.sg.Wait()
 
 	if err := c.conn.Close(); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Close", "Completed : %s", err)
@@ -603,8 +603,8 @@ func (c *Client) acceptRequests() {
 func (c *Client) handleRequest(data []byte, tx server.Stream) error {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Started")
 
-	c.sg.Add(1)
-	defer c.sg.Done()
+	// c.sg.Add(1)
+	// defer c.sg.Done()
 
 	if bytes.Equal(data, consts.PONGCTRLByte) {
 		return nil
@@ -1197,8 +1197,6 @@ func (s *Server) Close() error {
 	s.clusterLock.Unlock()
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Close", "Completed : Close Clusters")
 
-	s.cg.Wait()
-
 	s.rl.Lock()
 	s.running = false
 	s.rl.Unlock()
@@ -1665,6 +1663,8 @@ func (s *Server) handleClientConnections() {
 
 	}
 
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.handleClientConnections", "Waiting for Close")
+	s.cg.Wait()
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.handleClientConnections", "Completed")
 }
 
@@ -1834,6 +1834,8 @@ func (s *Server) handleClusterConnections() {
 		continue
 	}
 
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.handleClusterConnections", "Waiting for Close")
+	s.cg.Wait()
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.handleClusterConnections", "Completed")
 }
 
