@@ -8,8 +8,8 @@ const websocket = require("websocket-stream")
 const OK = "OK"
 const AuthRequest = "AUTH"
 const AuthResponse = "AUTHCRED"
-const AuthGranted = "AUTHGranted"
-const AuthDenied = "AUTHDenied"
+const AuthGranted = "AuthGranted"
+const AuthDenied = "AuthDenied"
 
 // Message returns a Buffer version of the jsonified object.
 function Message(obj){
@@ -43,7 +43,7 @@ function ParseAuthCredentialsAsHeader(auth_credentail) {
 function ParseAuthCredentialsAsCommand(auth_credentail) {
 	return JSON.stringify({
 		"name": AuthResponse,
-		"data": [auth_credentail],
+		"data": auth_credentail,
 	})
 }
 
@@ -269,50 +269,55 @@ class Websocket extends Octo {
 		}
 	}
 
-  _handleMessage(message, socket, next){
+  _handleMessage(messages, socket, next){
 		var self = this;
 
-		if(!message["name"] && next){
-		  console.log("Passing Message Data to Next: ", message);
-			return next.call(self,message, socket, self)
+		if(GetType(messages) !== "Array"){
+			throw new Error("Expected Array response");
 		}
 
-	  console.log("Handling Message Data: ", message);
-		switch(message.name){
-			case "OK":
-			 return
+		messages.forEach(function(message){
+			console.log("Delivered: ", message);
 
-			case AuthRequest:
-			 console.log("Authentication Requested!");
+			if(!message["name"] && next){
+				return next.call(self,message, socket, self)
+			}
 
-			 var data = ParseAuthCredentialsAsCommand(self.credentials);
-			 console.log("Authentication Data: ", data);
+		  console.log("Handling Message Data: ", message);
+			switch(message.name){
+				case "OK":
+				 return
 
-			 try{
-				 socket.write(data);
-			 }catch(e){
-				 console.log("Write Error: ", e)
-			 }
+				case AuthRequest:
+				 var data = ParseAuthCredentialsAsCommand(self.credentials);
 
-			 return
+				 try{
+					 socket.write(data);
+				 }catch(e){
+					 console.log("Write Error: ", e)
+				 }
 
-			case AuthDenied:
-			  console.log("Authentication Successfull!")
-			  self.authenticated = false;
-				return
+				 return
 
-			case AuthGranted:
-			 console.log("Authentication Successfull!");
+				case AuthDenied:
+				  console.log("Authentication Failed!")
+				  self.authenticated = false;
+					return
 
-			 self.buffer.each(function(data){
-				 console.log("Writing buffered data: ", data);
-				 socket.Write(data);
-			 });
+				case AuthGranted:
+				 console.log("Authentication Successfull!");
 
-			 self.authenticated = true;
-			 self.buffer = []
-			 return
-		}
+				 self.buffer.each(function(data){
+					 console.log("Writing buffered data: ", data);
+					 socket.Write(data);
+				 });
+
+				 self.authenticated = true;
+				 self.buffer = []
+				 return
+			}
+
+		})
 	}
 
 	_handleInternals(message, next, socket){
@@ -342,7 +347,6 @@ class Websocket extends Octo {
 
 		if(this.socket === null){
 			try {
-				console.log("Attempting Websocket Addr: ", this.current.path.href)
 				this.socket = websocket(this.current.path.href)
 
 				this.socket.on("connect", function(){
@@ -372,7 +376,6 @@ class Websocket extends Octo {
 				});
 
 				this.socket.on("data", function(data){
-					console.log("Recieved: ", data.toString())
 					self._handleInternals(data, self.callbacks['data'], self.socket)
 				});
 

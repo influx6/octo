@@ -28,7 +28,11 @@ const (
 	MaxWaitReadTime                = 5 * time.Second
 	OverMaxWaitReadTime            = 30 * time.Second
 	MaxWaitWriteTime               = 5 * time.Second
-	MaxPingInterval                = 5 * time.Second
+	WSReadTimeout                  = 30 * time.Second
+	WSWriteTimeout                 = 20 * time.Second
+	WaitTimeBeforeClustering       = 1 * time.Second
+	MaxPingInterval                = 80 * time.Second
+	MaxPingPongWait                = (MaxPingInterval * 9) / 10
 	MinDataSize                    = 512
 	MaxConnections                 = (64 * 1024)
 	MaxPayload                     = (1024 * 1024)
@@ -41,11 +45,6 @@ const (
 	MaxAcceptableReadTimeout       = 5
 	MaxTotalReconnection           = 20
 	MaxTotalConnectionFailure      = 20
-	WSReadTimeout                  = 30 * time.Second
-	WSWriteTimeout                 = 20 * time.Second
-	WaitTimeBeforeClustering       = 1 * time.Second
-	MaxPingPongResponseWait        = 7 * time.Minute
-	MaxPingPongInterval            = 2 * time.Minute
 )
 
 // Contains set variables for use in connection packages.
@@ -81,6 +80,7 @@ var (
 var (
 	ErrEmptyMessage       = errors.New("Empty Message received")
 	ErrConnClosed         = errors.New("Connection Closed")
+	ErrReadError          = errors.New("Connection failed to read on connection")
 	ErrUnsupported        = errors.New("Functionality is unsupported")
 	ErrUnservable         = errors.New("Command is not servable by system")
 	ErrUnsupportedFormat  = errors.New("Format/Type is unsupported")

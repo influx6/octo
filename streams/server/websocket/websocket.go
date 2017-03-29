@@ -8,10 +8,8 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -293,17 +291,19 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var cuuid = uuid.NewV4().String()
 
 	var client Client
-	client.server = s
-	client.instruments = s.instruments
-	client.Request = r
-	client.auth = s.auth
-	client.base = s.base
 	client.info = octo.Contact{
 		UUID:   cuuid,
 		SUUID:  s.info.SUUID,
 		Addr:   r.RemoteAddr,
 		Remote: r.RemoteAddr,
 	}
+
+	client.server = s
+	client.Request = r
+	client.auth = s.auth
+	client.base = s.base
+	client.instruments = s.instruments
+	client.closer = make(chan struct{}, 0)
 
 	conn, err := s.upgrader.Upgrade(w, r, s.Attr.Headers)
 	if err != nil {
@@ -344,6 +344,7 @@ type Client struct {
 	sg            sync.WaitGroup
 	server        *BaseSocketServer
 	cl            sync.Mutex
+	closer        chan struct{}
 	running       bool
 	doClose       bool
 	authenticated bool
@@ -359,7 +360,6 @@ func (c *Client) authenticate() error {
 		return nil
 	}
 
-	// fmt.Printf("Auth: %+q\n", c.Request.Header.Get("Authorization"))
 	if len(c.Request.Header.Get("Authorization")) == 0 {
 		return c.authorizationByRequest()
 	}
@@ -389,7 +389,7 @@ func (c *Client) authorizationByRequest() error {
 	}
 
 	if err := c.Send(buf, true); err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Error : %q", err.Error())
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Failed to Deliver : Error : %q", err.Error())
 		return nil
 	}
 
@@ -409,12 +409,13 @@ func (c *Client) authorizationByRequest() error {
 
 				messageType, message, err = c.Conn.ReadMessage()
 				if err != nil {
+					c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Read Error : %+q", err.Error())
 					c.Conn.SetReadDeadline(time.Time{})
 
 					// If we have passed acceptable reads thresholds then fail.
 					if failedReads >= consts.MaxAcceptableReadFails {
-						c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
-						return err
+						c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Max Read Failure : %+q", err.Error())
+						return consts.ErrReadError
 					}
 
 					failedReads++
@@ -580,6 +581,9 @@ func (c *Client) Close() error {
 	}
 	c.cl.Unlock()
 
+	// Close ping cycle
+	c.closer <- struct{}{}
+
 	c.sg.Wait()
 
 	if err := c.Conn.Close(); err != nil {
@@ -623,15 +627,55 @@ func (c *Client) Listen() error {
 	return nil
 }
 
+// cyclePings runs the continous ping and pong response received from the client.
+func (c *Client) cyclePings() {
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.cyclePings", "Started")
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(consts.MaxPingInterval)
+
+	{
+	cycleloop:
+		for {
+			select {
+			case <-c.closer:
+				ticker.Stop()
+				break cycleloop
+			case _, ok := <-ticker.C:
+				if !ok {
+					break cycleloop
+				}
+
+				c.Conn.WriteMessage(websocket.PingMessage, nil)
+			}
+		}
+
+	}
+
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.cyclePings", "Completed")
+}
+
 // acceptRequests handles the processing of requests from the server.
 func (c *Client) acceptRequests() {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.acceptRequests", "Started")
 	defer c.wg.Done()
 
+	c.Conn.SetPongHandler(func(appData string) error {
+		c.Conn.SetReadDeadline(time.Now().Add(consts.MaxPingPongWait))
+		return nil
+	})
+
+	c.wg.Add(1)
+
+	// Initialize ping handlers to maintain communication.
+	go c.cyclePings()
+
 	for c.isRunning() {
 		if c.shouldClose() {
 			break
 		}
+
+		c.Conn.SetReadDeadline(time.Now().Add(consts.MaxPingPongWait))
 
 		messageType, message, err := c.Conn.ReadMessage()
 		c.instruments.Log(octo.LOGTRANSMITTED, c.info.UUID, "websocket.Client.acceptRequests", "Type: %d, Message: %+q", messageType, message)
@@ -640,16 +684,18 @@ func (c *Client) acceptRequests() {
 		if err != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.acceptRequests", "Error : %q", err.Error())
 
-			if err == io.EOF || err == websocket.ErrBadHandshake || err == websocket.ErrCloseSent {
-				go c.Close()
-				break
-			}
+			// if err == io.EOF || err == websocket.ErrBadHandshake || err == websocket.ErrCloseSent {
+			// 	go c.Close()
+			// 	break
+			// }
 
-			if messageType == -1 && strings.Contains(err.Error(), "websocket: close") {
-				go c.Close()
-				break
-			}
+			// if messageType == -1 && strings.Contains(err.Error(), "websocket: close") {
+			go c.Close()
+			break
+			// }
 		}
+
+		c.Conn.SetReadDeadline(time.Time{})
 
 		var data []byte
 		switch messageType {
@@ -670,6 +716,8 @@ func (c *Client) acceptRequests() {
 
 		if err := c.base.Serve(data, &tx); err != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Server.acceptRequests", "Websocket System : Fails Serving : Error : %+s", err)
+
+			// Close connection
 			go c.Close()
 			return
 		}
