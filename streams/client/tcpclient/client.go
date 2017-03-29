@@ -432,6 +432,25 @@ func (w *TCPPod) acceptRequests() {
 			continue
 		}
 
+		if bytes.Equal(data, consts.PINGCTRLByte) {
+			w.conn.Write(consts.PONGCTRLByte, true)
+			continue
+		}
+
+		if bytes.HasSuffix(data, consts.PINGCTRLByte) {
+			w.conn.Write(consts.PONGCTRLByte, true)
+
+			// Trim Suffix from data
+			data = bytes.TrimSuffix(data, consts.PINGCTRLByte)
+		}
+
+		if bytes.HasPrefix(data, consts.PINGCTRLByte) {
+			w.conn.Write(consts.PONGCTRLByte, true)
+
+			// Trim Prefix from data
+			data = bytes.TrimPrefix(data, consts.PINGCTRLByte)
+		}
+
 		val, err := w.encoding.Decode(data)
 		if err != nil {
 			w.notify(octo.ErrorHandler, err)

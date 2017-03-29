@@ -187,7 +187,7 @@ type BasicServeHTTP struct {
 
 // NewBasicServeHTTP returns a new instance of the BasicServeHTTP object.
 func NewBasicServeHTTP(authenticate bool, inst octo.Instrumentation, info octo.Contact, auth octo.Credentials, system stream.System) *BasicServeHTTP {
-	primary := jsoni.NewSxConversations(system, &server.ContactServer{}, &server.ConversationServer{}, &server.AuthServer{Credentials: auth})
+	primary := jsoni.NewSxConversations(system, server.CloseServer{}, server.ContactServer{}, server.ConversationServer{}, &server.AuthServer{Credentials: auth})
 
 	return &BasicServeHTTP{
 		authenticate: authenticate,

@@ -54,6 +54,16 @@ func (t *Transmission) Ctx() context.Context {
 	return t.ctx
 }
 
+// // NotifyPing sends a ping notification arrival to this client.
+// func (t *Transmission) NotifyPing() {
+// 	t.client.NotifyPing()
+// }
+//
+// // NotifyPong sends a pong arrival notification to this client.
+// func (t *Transmission) NotifyPong() {
+// 	t.client.NotifyPong()
+// }
+
 // Close ends the internal conneciton.
 func (t *Transmission) Close() error {
 	go t.client.Close()
@@ -66,7 +76,7 @@ func (t *Transmission) Close() error {
 // interface for communication between a server.
 type Client struct {
 	ppMisses              int64
-	pings                 chan struct{}
+	closer                chan struct{}
 	pongs                 chan struct{}
 	clusterClient         bool
 	connectionInitiator   bool
@@ -119,6 +129,8 @@ func (c *Client) Close() error {
 	c.running = false
 	c.doClose = true
 	c.cl.Unlock()
+
+	close(c.closer)
 
 	c.sg.Wait()
 
@@ -239,11 +251,158 @@ func (c *Client) Listen() error {
 		}
 	}
 
-	c.wg.Add(1)
+	c.wg.Add(2)
 	go c.acceptRequests()
+	go c.acceptPingCycle()
 
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Listen", "Complete")
 	return nil
+}
+
+// SendAll sends the giving data to all clients and clusters the giving
+// set of data.
+func (c *Client) SendAll(data []byte, flush bool) error {
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Started : Transmission to All ")
+
+	if err := c.Send(data, flush); err != nil {
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Completed : %+q", err)
+		return err
+	}
+
+	for _, cu := range c.server.ClientList() {
+		if cu == c {
+			continue
+		}
+
+		if err := cu.Send(data, flush); err != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Unable to deliver for %+q : %+q", cu.info, err)
+		}
+	}
+
+	// FIX: Resolves issues with parser blowing up because of internal '\r\n' of data in ClusterDistRequest.
+	data = bytes.TrimSuffix(data, []byte("\r\n"))
+	data = bytes.TrimPrefix(data, []byte("\r\n"))
+
+	// Create a new data format for sending data over the channel using the exluding
+	// '()' character to safeguard the original message.
+	realData := commando.MakeMessage(string(consts.ClusterDistRequest), fmt.Sprintf("(%+s)", data))
+
+	clusters := c.server.ClusterList()
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Cluster Delivery : %+q : Total %d", realData, len(clusters))
+
+	for _, cu := range clusters {
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Data Delivery : %+q : %+q : %+q", realData, cu.info.UUID, cu.info.Addr)
+
+		if err := cu.Send(realData, flush); err != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Unable to deliver for %+q : %+q", cu.info, err)
+		}
+	}
+
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Completed")
+	return nil
+}
+
+// Send delivers a message into the clients connection stream.
+func (c *Client) Send(data []byte, flush bool) error {
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Send", "Started")
+	if data == nil {
+		c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Send", "Completed")
+		return nil
+	}
+
+	// c.sendg.Add(1)
+	// defer c.sendg.Done()
+
+	if len(data) > consts.MaxPayload {
+		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Send", "Completed : %s", consts.ErrDataOversized)
+		return consts.ErrDataOversized
+	}
+
+	if !bytes.HasSuffix(data, consts.CTRLLine) {
+		data = append(data, consts.CTRLLine...)
+	}
+
+	c.pl.Lock()
+	if c.writer != nil && c.conn != nil {
+		var deadline bool
+
+		// If this is a ping byte then send alone, flush
+		if bytes.Equal(data, consts.PINGCTRLByte) {
+			if err := c.writer.Flush(); err != nil {
+				c.pl.Unlock()
+				return err
+			}
+
+			_, err := c.writer.Write(data)
+
+			c.pl.Unlock()
+
+			return err
+		}
+
+		if c.writer.Available() < len(data) {
+			c.conn.SetWriteDeadline(time.Now().Add(consts.FlushDeadline))
+			deadline = true
+		}
+
+		c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "tcp.Client.Send", "Started : %+q", data)
+
+		_, err := c.writer.Write(data)
+
+		c.instruments.NotifyEvent(octo.Event{
+			Type:       octo.DataWrite,
+			Client:     c.info.UUID,
+			Server:     c.info.SUUID,
+			LocalAddr:  c.info.Local,
+			RemoteAddr: c.info.Remote,
+			Data:       octo.NewDataInstrument(data, err),
+			Details:    map[string]interface{}{},
+		})
+
+		if err != nil {
+			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Send", "Completed : %s", err)
+
+			if deadline {
+				c.conn.SetWriteDeadline(time.Time{})
+			}
+
+			c.pl.Unlock()
+
+			// Is it a Temporary net.Error if so, possible slow consumer here, close
+			// connection.
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				go c.Close()
+			}
+
+			return err
+		}
+
+		if flush {
+			if ferr := c.writer.Flush(); ferr != nil {
+				c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Send", "Flush Error : %s", ferr)
+			}
+
+			if deadline {
+				c.conn.SetWriteDeadline(time.Time{})
+			}
+		}
+
+		c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "tcp.Client.Send", "Completed")
+
+	}
+	c.pl.Unlock()
+
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Send", "Completed")
+	return nil
+}
+
+// Contact returns the client and server information.
+func (c *Client) Contact() (octo.Contact, octo.Contact) {
+	if c.clusterClient {
+		return c.info, c.server.clusterContact
+	}
+
+	return c.info, c.server.info
 }
 
 // IsRunning returns true/false if the giving server is running.
@@ -262,82 +421,78 @@ func (c *Client) shouldClose() bool {
 
 // acceptPingCycle begins listening for continous ping/pong cycle requests which
 // incrementally increases a counter for the total ping/pong set and received.
-// If after
-// func (c *Client) acceptPingCycle() {
-// 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptPingCycle", "Started")
-// 	defer c.wg.Wait()
-//
-// 	c.instruments.NotifyEvent(octo.Event{
-// 		Type:       octo.GoroutineOpened,
-// 		Client:     c.info.UUID,
-// 		Server:     c.info.SUUID,
-// 		LocalAddr:  c.info.Local,
-// 		RemoteAddr: c.info.Remote,
-// 		Data:       octo.NewGoroutineInstrument(),
-// 		Details:    map[string]interface{}{},
-// 	})
-//
-// 	defer c.instruments.NotifyEvent(octo.Event{
-// 		Type:       octo.GoroutineClosed,
-// 		Client:     c.info.UUID,
-// 		Server:     c.info.SUUID,
-// 		LocalAddr:  c.info.Local,
-// 		RemoteAddr: c.info.Remote,
-// 		Data:       octo.NewGoroutineInstrument(),
-// 		Details:    map[string]interface{}{},
-// 	})
-//
-// 	for c.IsRunning() {
-// 		if c.ppMisses > consts.MaxAcceptablePPMissesThreshold {
-// 			// Connection has probably become stale or slow, we need to kill it.
-// 			go c.Close()
-// 			return
-// 		}
-//
-// 		select {
-// 		case <-c.pings:
-// 			c.awaitPong()
-// 			continue
-// 		case <-c.pongs:
-// 			c.awaitPing()
-// 			continue
-// 		}
-// 	}
-//
-// 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptPingCycle", "Completed")
-// }
+func (c *Client) acceptPingCycle() {
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptPingCycle", "Started")
+	defer c.wg.Done()
 
-// awaitPing awaits a pong response for a giving ping request delivered.
-// func (c *Client) awaitPing() {
-// 	{
-// 		select {
-// 		case <-c.pings:
-// 			if c.ppMisses > 0 {
-// 				c.ppMisses--
-// 			}
-// 			return
-// 		case <-time.After(consts.MaxPingPongResponseWait):
-// 			c.ppMisses++
-// 			return
-// 		}
-// 	}
-// }
+	c.instruments.NotifyEvent(octo.Event{
+		Type:       octo.GoroutineOpened,
+		Client:     c.info.UUID,
+		Server:     c.info.SUUID,
+		LocalAddr:  c.info.Local,
+		RemoteAddr: c.info.Remote,
+		Data:       octo.NewGoroutineInstrument(),
+		Details:    map[string]interface{}{},
+	})
 
-// awaitPong awaits a pong response for a giving ping request delivered.
-// func (c *Client) awaitPong() {
-// 	{
-// 		select {
-// 		case <-c.pongs:
-// 			if c.ppMisses > 0 {
-// 				c.ppMisses--
-// 			}
-// 			return
-// 		case <-time.After(consts.MaxPingPongResponseWait):
-// 			c.ppMisses++
-// 			return
-// 		}
-// 	}
-// }
+	defer c.instruments.NotifyEvent(octo.Event{
+		Type:       octo.GoroutineClosed,
+		Client:     c.info.UUID,
+		Server:     c.info.SUUID,
+		LocalAddr:  c.info.Local,
+		RemoteAddr: c.info.Remote,
+		Data:       octo.NewGoroutineInstrument(),
+		Details:    map[string]interface{}{},
+	})
+
+	ticker := time.NewTicker(consts.MaxPingInterval)
+
+	{
+	cloop:
+		for c.IsRunning() {
+			select {
+			case <-c.closer:
+				break cloop
+			case <-c.pongs:
+
+				// Register PongEvent.
+				go c.instruments.NotifyEvent(octo.Event{
+					Type:       octo.PongEvent,
+					Client:     c.info.UUID,
+					Server:     c.info.SUUID,
+					LocalAddr:  c.info.Local,
+					RemoteAddr: c.info.Remote,
+					Details:    map[string]interface{}{},
+				})
+
+				if c.ppMisses > 0 {
+					c.ppMisses--
+				}
+				continue
+			case <-ticker.C:
+
+				// Register PingEvent.
+				go c.instruments.NotifyEvent(octo.Event{
+					Type:       octo.PingEvent,
+					Client:     c.info.UUID,
+					Server:     c.info.SUUID,
+					LocalAddr:  c.info.Local,
+					RemoteAddr: c.info.Remote,
+					Details:    map[string]interface{}{},
+				})
+
+				c.Send(consts.PINGCTRLByte, true)
+				continue
+			case <-time.After(consts.MaxPingPongWait):
+				c.ppMisses++
+				continue
+			}
+		}
+
+	}
+
+	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.acceptPingCycle", "Completed")
+}
 
 // acceptRequests begins listening for messages from the giving connection.
 func (c *Client) acceptRequests() {
@@ -450,6 +605,20 @@ func (c *Client) handleRequest(data []byte, tx server.Stream) error {
 
 	c.sg.Add(1)
 	defer c.sg.Done()
+
+	if bytes.Equal(data, consts.PONGCTRLByte) {
+		return nil
+	}
+
+	// Trim Suffix from data.
+	if bytes.HasSuffix(data, consts.PONGCTRLByte) {
+		data = bytes.TrimSuffix(data, consts.PONGCTRLByte)
+	}
+
+	// Trim Prefix from data.
+	if bytes.HasPrefix(data, consts.PONGCTRLByte) {
+		data = bytes.TrimPrefix(data, consts.PONGCTRLByte)
+	}
 
 	if err := c.system.Serve(data, tx); err != nil {
 		c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.handleRequest", "Completed : System Serve : Error : %+s", err)
@@ -880,142 +1049,6 @@ func (c *Client) temporaryRead() ([]byte, error) {
 	return block, nil
 }
 
-// SendAll sends the giving data to all clients and clusters the giving
-// set of data.
-func (c *Client) SendAll(data []byte, flush bool) error {
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Started : Transmission to All ")
-
-	if err := c.Send(data, flush); err != nil {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Completed : %+q", err)
-		return err
-	}
-
-	for _, cu := range c.server.ClientList() {
-		if cu == c {
-			continue
-		}
-
-		if err := cu.Send(data, flush); err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Unable to deliver for %+q : %+q", cu.info, err)
-		}
-	}
-
-	// FIX: Resolves issues with parser blowing up because of internal '\r\n' of data in ClusterDistRequest.
-	data = bytes.TrimSuffix(data, []byte("\r\n"))
-	data = bytes.TrimPrefix(data, []byte("\r\n"))
-
-	// Create a new data format for sending data over the channel using the exluding
-	// '()' character to safeguard the original message.
-	realData := commando.MakeMessage(string(consts.ClusterDistRequest), fmt.Sprintf("(%+s)", data))
-
-	clusters := c.server.ClusterList()
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Cluster Delivery : %+q : Total %d", realData, len(clusters))
-
-	for _, cu := range clusters {
-		c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Data Delivery : %+q : %+q : %+q", realData, cu.info.UUID, cu.info.Addr)
-
-		if err := cu.Send(realData, flush); err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.SendAll", "Unable to deliver for %+q : %+q", cu.info, err)
-		}
-	}
-
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.SendAll", "Completed")
-	return nil
-}
-
-// ErrDataOversized is delivered when the provide data passes the maximum allowed
-// data size.
-var ErrDataOversized = errors.New("Data size is to big")
-
-// Send delivers a message into the clients connection stream.
-func (c *Client) Send(data []byte, flush bool) error {
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Send", "Started")
-	if data == nil {
-		c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Send", "Completed")
-		return nil
-	}
-
-	// c.sendg.Add(1)
-	// defer c.sendg.Done()
-
-	if len(data) > consts.MaxPayload {
-		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Send", "Completed : %s", ErrDataOversized)
-		return ErrDataOversized
-	}
-
-	if !bytes.HasSuffix(data, consts.CTRLLine) {
-		data = append(data, consts.CTRLLine...)
-	}
-
-	c.pl.Lock()
-	if c.writer != nil && c.conn != nil {
-		var deadline bool
-
-		if c.writer.Available() < len(data) {
-			c.conn.SetWriteDeadline(time.Now().Add(consts.FlushDeadline))
-			deadline = true
-		}
-
-		c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "tcp.Client.Send", "Started : %+q", data)
-
-		_, err := c.writer.Write(data)
-
-		c.instruments.NotifyEvent(octo.Event{
-			Type:       octo.DataWrite,
-			Client:     c.info.UUID,
-			Server:     c.info.SUUID,
-			LocalAddr:  c.info.Local,
-			RemoteAddr: c.info.Remote,
-			Data:       octo.NewDataInstrument(data, err),
-			Details:    map[string]interface{}{},
-		})
-
-		if err != nil {
-			c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Send", "Completed : %s", ErrDataOversized)
-
-			if deadline {
-				c.conn.SetWriteDeadline(time.Time{})
-			}
-
-			c.pl.Unlock()
-
-			// Is it a Temporary net.Error if so, possible slow consumer here, close
-			// connection.
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				go c.Close()
-			}
-
-			return err
-		}
-
-		if flush {
-			if ferr := c.writer.Flush(); ferr != nil {
-				c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.Send", "Flush Error : %s", ferr)
-			}
-
-			if deadline {
-				c.conn.SetWriteDeadline(time.Time{})
-			}
-		}
-
-		c.instruments.Log(octo.LOGTRANSMISSION, c.info.UUID, "tcp.Client.Send", "Completed")
-
-	}
-	c.pl.Unlock()
-
-	c.instruments.Log(octo.LOGINFO, c.info.UUID, "tcp.Client.Send", "Completed")
-	return nil
-}
-
-// Contact returns the client and server information.
-func (c *Client) Contact() (octo.Contact, octo.Contact) {
-	if c.clusterClient {
-		return c.info, c.server.clusterContact
-	}
-
-	return c.info, c.server.info
-}
-
 //================================================================================
 
 // ServerAttr defines a struct which holds the attributes and config values for a
@@ -1152,7 +1185,7 @@ func (s *Server) Close() error {
 		}
 	}
 	s.clientLock.Unlock()
-	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Close", "Finished : Close Clients")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Close", "Completed : Close Clients")
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Close", "Init : Close Clusters")
 	s.clusterLock.Lock()
@@ -1162,7 +1195,7 @@ func (s *Server) Close() error {
 		}
 	}
 	s.clusterLock.Unlock()
-	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Close", "Finished : Close Clusters")
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "tcp.Server.Close", "Completed : Close Clusters")
 
 	s.cg.Wait()
 
@@ -1219,8 +1252,8 @@ func (s *Server) Listen(system server.System) error {
 	s.rl.Unlock()
 
 	s.clientSystem = system
-	s.clientBaseSystem = commando.NewSxConversations(system, commandoServer.ContactServer{}, commandoServer.ConversationServer{})
-	s.clusterSystem = commando.NewSxConversations(system, commandoServer.ContactServer{}, commandoServer.ConversationServer{}, &commandoServer.AuthServer{Credentials: s}, &commandoServer.ClusterServer{
+	s.clientBaseSystem = commando.NewSxConversations(system, commandoServer.CloseServer{}, commandoServer.ContactServer{}, commandoServer.ConversationServer{})
+	s.clusterSystem = commando.NewSxConversations(system, commandoServer.CloseServer{}, commandoServer.ContactServer{}, commandoServer.ConversationServer{}, &commandoServer.AuthServer{Credentials: s}, &commandoServer.ClusterServer{
 		ClusterHandler:         s,
 		ClientsMessageDelivery: s,
 		Clusters:               s,
@@ -1284,7 +1317,7 @@ func (s *Server) RelateWithCluster(addr string) error {
 		},
 		server:              s,
 		conn:                conn,
-		pings:               make(chan struct{}),
+		closer:              make(chan struct{}),
 		pongs:               make(chan struct{}),
 		instruments:         s.instruments,
 		clusterClient:       true,
@@ -1583,7 +1616,7 @@ func (s *Server) handleClientConnections() {
 			},
 			server:              s,
 			conn:                conn,
-			pings:               make(chan struct{}),
+			closer:              make(chan struct{}),
 			pongs:               make(chan struct{}),
 			instruments:         s.instruments,
 			system:              s.clientBaseSystem,
@@ -1751,7 +1784,7 @@ func (s *Server) handleClusterConnections() {
 			conn:                conn,
 			instruments:         s.instruments,
 			authenticator:       s.clientSystem,
-			pings:               make(chan struct{}),
+			closer:              make(chan struct{}),
 			pongs:               make(chan struct{}),
 			system:              s.clusterSystem,
 			clusterClient:       true,

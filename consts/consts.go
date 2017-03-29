@@ -7,9 +7,11 @@ import (
 
 // Contains the set of constant values usable in data transmissions.
 const (
-	CTRL  = "\r\n"
-	AnyIP = "0.0.0.0"
-	Zero  = "\x00"
+	CTRL     = "\r\n"
+	AnyIP    = "0.0.0.0"
+	Zero     = "\x00"
+	PONGCTRL = "PONG\r\n"
+	PINGCTRL = "PING\r\n"
 )
 
 // contains a giving set of constants for usage in other packages.
@@ -32,6 +34,7 @@ const (
 	WSWriteTimeout                 = 20 * time.Second
 	WaitTimeBeforeClustering       = 1 * time.Second
 	MaxPingInterval                = 80 * time.Second
+	InactiveInterval               = 80 * time.Second
 	MaxPingPongWait                = (MaxPingInterval * 9) / 10
 	MinDataSize                    = 512
 	MaxConnections                 = (64 * 1024)
@@ -58,8 +61,10 @@ var (
 var (
 	CTRLLine              = []byte(CTRL)
 	Empty                 = []byte("")
-	PING                  = []byte("PING")
+	PINGCTRLByte          = []byte(PINGCTRL)
+	PONGCTRLByte          = []byte(PONGCTRL)
 	PONG                  = []byte("PONG")
+	PING                  = []byte("PING")
 	CLOSE                 = []byte("CLOSE")
 	ClientContactRequest  = []byte("CLINFO")
 	ClientContactResponse = []byte("CLINFORES")
@@ -85,6 +90,7 @@ var (
 	ErrUnservable         = errors.New("Command is not servable by system")
 	ErrUnsupportedFormat  = errors.New("Format/Type is unsupported")
 	ErrTimeoutOverReached = errors.New("Maximum timeout allowed reached")
+	ErrDataOversized      = errors.New("Data size is to big")
 
 	ErrUnstableRead  = errors.New("Connection read was unstable")
 	ErrUnstableWrite = errors.New("Connection write was unstable")

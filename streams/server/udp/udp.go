@@ -184,7 +184,7 @@ func (s *Server) Listen(system server.System) error {
 
 	s.conn = conn
 	s.auth = system
-	s.base = jsoni.NewSxConversations(system, &jsoniserver.ContactServer{}, &jsoniserver.ConversationServer{}, &jsoniserver.AuthServer{
+	s.base = jsoni.NewSxConversations(system, jsoniserver.CloseServer{}, jsoniserver.ContactServer{}, jsoniserver.ConversationServer{}, &jsoniserver.AuthServer{
 		Credentials: s,
 	})
 

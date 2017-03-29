@@ -39,6 +39,9 @@ const (
 	ConnectionAuthenticate
 	ClusterConnection
 
+	PingEvent
+	PongEvent
+
 	DataRead
 	DataWrite
 	DataTransform
@@ -132,6 +135,14 @@ type Authenticator interface {
 // for the giving entity.
 type Credentials interface {
 	Credential() AuthCredential
+}
+
+//================================================================================
+
+// PingPongs defines an interface which exposes method for pingpong notifications.
+type PingPongs interface {
+	NotifyPing()
+	NotifyPong()
 }
 
 //================================================================================

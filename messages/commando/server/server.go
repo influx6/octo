@@ -148,6 +148,38 @@ func (c AuthServer) CanServe(cmd commando.CommandMessage) bool {
 
 //================================================================================
 
+// CloseServer defines a Server which provides CLOSE message handler.
+type CloseServer struct{}
+
+// Serve handles the response requested by the giving commando.CommandMessage returning
+// then needed response.
+func (c CloseServer) Serve(cmd commando.CommandMessage, tx server.Stream) error {
+	switch cmd.Name {
+	case string(consts.CLOSE):
+		if err := tx.Send(commando.WrapResponseBlock(consts.OK, nil), true); err != nil {
+			return err
+		}
+
+		return tx.Close()
+
+	default:
+		return consts.ErrUnservable
+	}
+}
+
+// CanServe returns true/false if the giving element is able to server the
+// provided message.Command.
+func (c CloseServer) CanServe(cmd commando.CommandMessage) bool {
+	switch cmd.Name {
+	case string(consts.CLOSE):
+		return true
+	default:
+		return false
+	}
+}
+
+//================================================================================
+
 // ConversationServer defines a new struct which implements the several message
 // handling for the commando message types.
 type ConversationServer struct {
@@ -157,17 +189,22 @@ type ConversationServer struct {
 // then needed response.
 func (c ConversationServer) Serve(cmd commando.CommandMessage, tx server.Stream) error {
 	switch cmd.Name {
-	case string(consts.CLOSE):
-		if err := tx.Send(commando.WrapResponseBlock(consts.OK, nil), true); err != nil {
-			return err
+	case string(consts.PONG):
+
+		// If supported by the Streamer, then notify of Pong.
+		if no, ok := tx.(octo.PingPongs); ok {
+			no.NotifyPong()
 		}
 
-		return tx.Close()
-
-	case string(consts.PONG):
 		return tx.Send(commando.WrapResponseBlock(consts.PING, nil), true)
 
 	case string(consts.PING):
+
+		// If supported by the Streamer, then notify of Ping.
+		if no, ok := tx.(octo.PingPongs); ok {
+			no.NotifyPing()
+		}
+
 		return tx.Send(commando.WrapResponseBlock(consts.PONG, nil), true)
 
 	case string(consts.OK):
@@ -182,8 +219,6 @@ func (c ConversationServer) Serve(cmd commando.CommandMessage, tx server.Stream)
 // provided message.Command.
 func (c ConversationServer) CanServe(cmd commando.CommandMessage) bool {
 	switch cmd.Name {
-	case string(consts.CLOSE):
-		return true
 	case string(consts.PONG):
 		return true
 	case string(consts.PING):

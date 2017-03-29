@@ -234,7 +234,7 @@ func NewBaseSocketServer(instruments octo.Instrumentation, attr BaseSocketAttr, 
 	base.clients = make(map[string]*Client)
 
 	base.auth = system
-	base.base = jsoni.NewSxConversations(system, &jsoniserver.ContactServer{}, &jsoniserver.ConversationServer{}, &jsoniserver.AuthServer{
+	base.base = jsoni.NewSxConversations(system, jsoniserver.CloseServer{}, jsoniserver.ContactServer{}, jsoniserver.ConversationServer{}, &jsoniserver.AuthServer{
 		Credentials: credentials,
 	})
 
