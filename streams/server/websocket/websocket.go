@@ -195,6 +195,10 @@ func (s *SocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Max-Age", "86400")
+
 	s.base.ServeHTTP(w, r)
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.ServeHTTP", "Completed")

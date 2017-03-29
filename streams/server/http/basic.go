@@ -123,6 +123,10 @@ func (s *BasicServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Max-Age", "86400")
+
 	// Call basic to treat the request.
 	s.basic.ServeHTTP(w, r)
 

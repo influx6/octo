@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title></title>
+  </head>
+  <body>
+    <script type="text/javascript" src="assets/octojs.js"></script>
+    <script type="text/javascript">
+    const octo = require("octojs");
+    const auth = octo.AuthCredentials("XScheme", "Rack", "4343121-GU", "Teddybear")
+    const socketAttr = octo.Attr("http://localhost:6060", [], true)
+
+    const socket = new octo.WebsocketClient(auth, socketAttr, {
+      error: function(err){
+        console.log("Error: ", err)
+      },
+      data: function(data, tx, res){
+        console.log("Data: ", data.toString())
+        var answers = data.toString().split("\r\n").filter(function(item){
+          return item.length !== 0
+        })
+
+        expect(answers.length).to.equal(2)
+        expect(answers[0]).to.equal("DEX")
+        expect(answers[1]).to.equal("DUMP")
+      },
+    });
+
+    socket.on("end", function(data){
+      console.log("Ending data: ", data)
+    });
+
+    socket.on("data", function(data){
+      console.log("Logging data: ", data)
+    });
+
+    socket.Do(octo.BufferMessage([
+      {"name": "REX", "data": null},
+      {"name": "PUMP", "data": null},
+    ]));
+
+    </script>
+  </body>
+</html>
