@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	classicHttp "net/http"
 	"os"
 	"os/signal"
 
@@ -92,6 +93,9 @@ func main() {
 	socketServer := websocket.New(instruments, websocket.SocketAttr{
 		Authenticate: true,
 		Addr:         "127.0.0.1:6060",
+		OriginValidator: func(r *classicHttp.Request) bool {
+			return true
+		},
 	})
 
 	if err := httpServer.Listen(system); err != nil {

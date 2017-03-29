@@ -279,7 +279,7 @@ class Websocket extends Octo {
 		messages.forEach(function(message){
 			console.log("Delivered: ", message);
 
-			if(!message["name"] && next){
+			if(!message.hasOwnProperty("name") && next){
 				return next.call(self,message, socket, self)
 			}
 
@@ -294,22 +294,18 @@ class Websocket extends Octo {
 				 try{
 					 socket.write(data);
 				 }catch(e){
-					 console.log("Write Error: ", e)
+					 console.log("Authentication request write failed: ", e)
 				 }
 
 				 return
 
 				case AuthDenied:
-				  console.log("Authentication Failed!")
 				  self.authenticated = false;
 					return
 
 				case AuthGranted:
-				 console.log("Authentication Successfull!");
-
-				 self.buffer.each(function(data){
-					 console.log("Writing buffered data: ", data);
-					 socket.Write(data);
+				 self.buffer.forEach(function(data){
+					 socket.write(data);
 				 });
 
 				 self.authenticated = true;
