@@ -4,7 +4,7 @@ services:
   - docker
 
 before_install:
-  - docker build -f test.Dockerfile -t influx6/octo-build
+  - docker build -f test.Dockerfile -t influx6/octo-build ./
 
 env:
   - GIMME_OS=linux GIMME_ARCH=amd64
