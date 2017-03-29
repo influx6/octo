@@ -28,4 +28,4 @@ Octo currently provides 4 implemented protocols with plans to expand the list as
 Client Libraries
 ----------------
 
-All supported procotols have client libraries which allows connecting to given services and handle any internal operation private to these procotols. Octo also supports connections with the Http and Websocket protocols from NodeJS and Webbrowser through the [OctoJS](https://github.com/influx6/octo/octojs) package which allows connecting on javascript runtimes.
+All supported protocols have Go based client libraries which allows connecting to given services and handle any internal operation private to these procotols. Octo also supports connections with the Http and Websocket protocols from NodeJS and Webbrowser through the [OctoJS](./octojs) package which allows connecting on javascript runtimes.
