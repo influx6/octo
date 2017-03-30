@@ -3,6 +3,7 @@
 const http = require("http")
 const url = require("url")
 const websocket = require("websocket-stream")
+const request = require('request');
 
 // These are sets of possible message headers.
 const OK = "OK"
@@ -158,44 +159,35 @@ class HTTP extends Octo {
 		var self = this;
 
 		try {
-			var req = http.request({
+			var req = request({
 				method: "POST",
-				path: "/",
-				port: this.current.path.port,
-				hostname: this.current.path.hostname,
+				url: this.current.path.href,
 				headers: {
 					"Authorization": ParseAuthCredentialsAsHeader(this.credentials),
 					"Content-Type": "application/json",
 				},
-			}, function(res){
-				self.current.connected = true
-
-				var incoming = []
-
-				res.setEncoding('utf8')
-				res.on("data", function(chunk) {
-					incoming.push(chunk);
-				});
-
-				res.on("end", function(){
+			}, function(err, res, body){
+				if(err != null || err != undefined){
 					self.current.connected = false
-					if(self.callbacks['data']){
-						self.callbacks.data.call(self, incoming, res, self)
-					}
-				})
-			});
 
-			req.on("error", function(e){
-					self.current.connected = false
-					if(self.callbacks['error']){
-						self.callbacks.error.call(self, e, req, self)
-					}
-
+				  console.log("HTTP Request Error: ", err)
 					self.current.drops++
+
+					if(self.callbacks['error']){
+						self.callbacks.error.call(self, err, res,req, self)
+					}
+
+					return
+				}
+
+				if(self.callbacks['data']){
+					self.callbacks.data.call(self, data, res, self)
+				}
 			});
 
 			req.end(data, deliveryCallback);
 		}catch(e){
+			  console.log("HTTP Request Error: ", e)
 				self.current.drops++
 		}
 	}

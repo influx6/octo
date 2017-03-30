@@ -14,18 +14,18 @@
     const httpAttr = octo.Attr("http://localhost:5060", [], true)
     const socketAttr = octo.Attr("ws://localhost:6060", [], true)
 
-      const http = new octo.HTTPClient(auth, httpAttr, function(data, tx, res){
-        var answers = data.toString().split("\r\n").filter(function(item){
-          return item.length !== 0
-        })
-
-        console.log("HTTP:Answers: ", answers)
+    const http = new octo.HTTPClient(auth, httpAttr, function(data, tx, res){
+      var answers = data.toString().split("\r\n").filter(function(item){
+        return item.length !== 0
       })
 
-      http.Do(octo.BufferMessage([
-        {"name": "REX", "data": null},
-        {"name": "PUMP", "data": null},
-      ]))
+      console.log("HTTP:Answers: ", answers)
+    })
+
+    http.Do(octo.BufferMessage([
+      {"name": "REX", "data": null},
+      {"name": "PUMP", "data": null},
+    ]))
 
     const socket = new octo.WebsocketClient(auth, socketAttr, {
       error: function(err){
