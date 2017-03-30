@@ -1,0 +1,27 @@
+{
+  "name": "octojs",
+  "version": "1.0.0",
+  "description": "A client side library for communicating with octo servers",
+  "main": "octojs.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "mocha --report spec"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/influx6/octo.git"
+  },
+  "keywords": [
+    "octo",
+    "octoservers",
+    "octojs"
+  ],
+  "author": "Alexander Ewetumo",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/influx6/octo/issues"
+  },
+  "homepage": "https://github.com/influx6/octo#readme"
+}
