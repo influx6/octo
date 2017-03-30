@@ -27,6 +27,7 @@ import (
 type BasicAttr struct {
 	Addr         string
 	Authenticate bool
+	SkipCORS     bool
 	Headers      http.Header
 	TLSConfig    *tls.Config
 	Auth         octo.AuthCredential
@@ -98,7 +99,7 @@ func (s *BasicServer) Listen(system stream.System) error {
 		return err
 	}
 
-	s.basic = NewBasicServeHTTP(s.Attr.Authenticate, s.instruments, s.info, s, system)
+	s.basic = NewBasicServeHTTP(s.Attr.Authenticate, s.Attr.SkipCORS, s.instruments, s.info, s, system)
 
 	s.rl.Lock()
 	{
@@ -122,10 +123,6 @@ func (s *BasicServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServer.ServeHTTP", "Completed")
 		return
 	}
-
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-	w.Header().Set("Access-Control-Max-Age", "86400")
 
 	// Call basic to treat the request.
 	s.basic.ServeHTTP(w, r)
@@ -187,10 +184,11 @@ type BasicServeHTTP struct {
 	instruments  octo.Instrumentation
 	info         octo.Contact
 	authenticate bool
+	skipCORS     bool
 }
 
 // NewBasicServeHTTP returns a new instance of the BasicServeHTTP object.
-func NewBasicServeHTTP(authenticate bool, inst octo.Instrumentation, info octo.Contact, auth octo.Credentials, system stream.System) *BasicServeHTTP {
+func NewBasicServeHTTP(authenticate bool, skipCORS bool, inst octo.Instrumentation, info octo.Contact, auth octo.Credentials, system stream.System) *BasicServeHTTP {
 	primary := jsoni.NewSxConversations(system, server.CloseServer{}, server.ContactServer{}, server.ConversationServer{}, &server.AuthServer{Credentials: auth})
 
 	return &BasicServeHTTP{
@@ -199,6 +197,7 @@ func NewBasicServeHTTP(authenticate bool, inst octo.Instrumentation, info octo.C
 		system:       system,
 		instruments:  inst,
 		info:         info,
+		skipCORS:     skipCORS,
 	}
 }
 
@@ -213,6 +212,13 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Started")
 
 	w.Header().Add("Connection", "keep-alive")
+
+	if !s.skipCORS {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+	}
 
 	defer r.Body.Close()
 

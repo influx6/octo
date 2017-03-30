@@ -37,6 +37,7 @@ type SocketAttr struct {
 	Authenticate       bool
 	MessageCompression bool
 	Addr               string
+	SkipCORS           bool
 	TLSConfig          *tls.Config
 	Headers            map[string]string
 	Credential         octo.AuthCredential
@@ -120,6 +121,7 @@ func (s *SocketServer) Listen(system server.System) error {
 		Authenticate:       s.Attr.Authenticate,
 		OriginValidator:    s.Attr.OriginValidator,
 		MessageCompression: s.Attr.MessageCompression,
+		SkipCORS:           s.Attr.SkipCORS,
 	}, s.info, s, system)
 
 	s.rl.Lock()
@@ -195,10 +197,6 @@ func (s *SocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-	w.Header().Set("Access-Control-Max-Age", "86400")
-
 	s.base.ServeHTTP(w, r)
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.SocketServer.ServeHTTP", "Completed")
@@ -211,6 +209,7 @@ func (s *SocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type BaseSocketAttr struct {
 	Authenticate       bool
 	MessageCompression bool
+	SkipCORS           bool
 	Headers            http.Header
 	OriginValidator    RequestOriginValidator
 }
@@ -291,6 +290,13 @@ func (s *BaseSocketServer) Close() error {
 // ServeHTTP defines a method to serve and handle websocket requests.
 func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "websocket.BaseSocketServer.ServeHTTP", "Started")
+
+	if !s.Attr.SkipCORS {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+	}
 
 	var cuuid = uuid.NewV4().String()
 

@@ -173,6 +173,7 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 func newBasicServeHTTP(t *testing.T, authenticate bool, cred octo.Credentials, system server.System) *httpbasic.BasicServeHTTP {
 	return httpbasic.NewBasicServeHTTP(
 		authenticate,
+		false,
 		instruments.Instruments(mock.NewTestLogger(), nil),
 		utils.NewContact(":6070"),
 		cred,

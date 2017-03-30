@@ -101,10 +101,20 @@ class Octo {
 
 	prepareServers(){
 	  for(var index in this.attr.clusters){
-		  this.servers.push({ path: url.parse(this.attr.clusters[index]), reconns: 0, drops: 0, connected: false})
-	  }
+		  this.servers.push({
+				path: url.parse(this.attr.clusters[index]),
+				reconns: 0,
+				drops: 0,
+				connected: false,
+			});
+	  };
 
-	  this.servers.push({ path: url.parse(this.attr.addr), reconns: 0, drops: 0, connected: false})
+	  this.servers.push({
+			path: url.parse(this.attr.addr),
+			reconns: 0,
+			drops: 0,
+			connected: false,
+		});
 	}
 
 	// Octo.getNextServer returns the next available working server.
@@ -158,6 +168,8 @@ class HTTP extends Octo {
 					"Content-Type": "application/json",
 				},
 			}, function(res){
+				self.current.connected = true
+
 				var incoming = []
 
 				res.setEncoding('utf8')
@@ -166,6 +178,7 @@ class HTTP extends Octo {
 				});
 
 				res.on("end", function(){
+					self.current.connected = false
 					if(self.callbacks['data']){
 						self.callbacks.data.call(self, incoming, res, self)
 					}
@@ -173,16 +186,17 @@ class HTTP extends Octo {
 			});
 
 			req.on("error", function(e){
+					self.current.connected = false
 					if(self.callbacks['error']){
 						self.callbacks.error.call(self, e, req, self)
 					}
 
-				this.current.drops++
+					self.current.drops++
 			});
 
 			req.end(data, deliveryCallback);
 		}catch(e){
-				this.current.drops++
+				self.current.drops++
 		}
 	}
 }
@@ -277,13 +291,13 @@ class Websocket extends Octo {
 		}
 
 		messages.forEach(function(message){
-			console.log("Delivered: ", message);
+			// console.log("Delivered: ", message);
 
 			if(!message.hasOwnProperty("name") && next){
 				return next.call(self,message, socket, self)
 			}
 
-		  console.log("Handling Message Data: ", message);
+		  // console.log("Handling Message Data: ", message);
 			switch(message.name){
 				case "OK":
 				 return
