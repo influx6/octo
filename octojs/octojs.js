@@ -181,7 +181,7 @@ class HTTP extends Octo {
 				}
 
 				if(self.callbacks['data']){
-					self.callbacks.data.call(self, data, res, self)
+					self.callbacks.data.call(self, body, res, self)
 				}
 			});
 

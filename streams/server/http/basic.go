@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/influx6/faux/context"
@@ -210,6 +211,21 @@ func (s *BasicServeHTTP) Contact() octo.Contact {
 // converted to websockets request.
 func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "Started")
+
+	if !s.skipCORS {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+	}
+
+	switch strings.ToLower(r.Method) {
+	case "options":
+		w.WriteHeader(http.StatusNoContent)
+		return
+	default:
+		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpbasic.BasicServeHTTP.ServeHTTP", "New Request : %q : %q", r.Method, r.URL.Path)
+	}
 
 	w.Header().Add("Connection", "keep-alive")
 
