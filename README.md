@@ -165,7 +165,9 @@ func (mockSystem) Serve(message []byte, tx server.Stream) error {
 	if !ok {
 		return consts.ErrParseError
 	}
-
+	
+	// We personally want this example to bundle the response together, but this is not standard (nor is there a standard)
+	// It can equally respond to each individual command seperately.
 	var res bytes.Buffer
 
 	for _, command := range commands {
