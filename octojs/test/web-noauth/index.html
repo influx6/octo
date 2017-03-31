@@ -5,13 +5,13 @@
     <title></title>
   </head>
   <body>
-    <h1> Websocket test </h1>
+    <h1> Websocket test using no Authentication</h1>
     <p>Open console in developer tools to see output</p>
     <script type="text/javascript" src="assets/octojs.js"></script>
     <script type="text/javascript">
     const octo = require("octojs");
     // const auth = octo.AuthCredentials("XScheme", "Rack", "4343121-GU", "Teddybear")
-    
+
     const httpAttr = octo.Attr("http://localhost:5060", [], null)
     const socketAttr = octo.Attr("ws://localhost:6060", [], null)
 
