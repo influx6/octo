@@ -11,10 +11,14 @@
     <script type="text/javascript">
     const octo = require("octojs");
     const auth = octo.AuthCredentials("XScheme", "Rack", "4343121-GU", "Teddybear")
-    const httpAttr = octo.Attr("http://localhost:5060", [], true)
-    const socketAttr = octo.Attr("ws://localhost:6060", [], true)
 
-    const http = new octo.HTTPClient(auth, httpAttr, function(data, tx, res){
+    const httpAttr = octo.Attr("http://localhost:5060", [], auth)
+    const socketAttr = octo.Attr("ws://localhost:6060", [], auth)
+
+    console.log("HTTP:Attr: ", httpAttr)
+    console.log("Websocket:Attr: ", socketAttr)
+
+    const http = new octo.HTTPClient(httpAttr, function(data, tx, res){
       var answers = data.toString().split("\r\n").filter(function(item){
         return item.length !== 0
       })
@@ -27,7 +31,7 @@
       {"name": "PUMP", "data": null},
     ]))
 
-    const socket = new octo.WebsocketClient(auth, socketAttr, {
+    const socket = new octo.WebsocketClient(socketAttr, {
       error: function(err){
         console.log("Error: ", err)
       },

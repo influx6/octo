@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title></title>
+  </head>
+  <body>
+    <h1> Websocket test </h1>
+    <p>Open console in developer tools to see output</p>
+    <script type="text/javascript" src="assets/octojs.js"></script>
+    <script type="text/javascript">
+    const octo = require("octojs");
+    // const auth = octo.AuthCredentials("XScheme", "Rack", "4343121-GU", "Teddybear")
+    
+    const httpAttr = octo.Attr("http://localhost:5060", [], null)
+    const socketAttr = octo.Attr("ws://localhost:6060", [], null)
+
+    const http = new octo.HTTPClient(httpAttr, function(data, tx, res){
+      var answers = data.toString().split("\r\n").filter(function(item){
+        return item.length !== 0
+      })
+
+      console.log("HTTP:Answers: ", answers)
+    })
+
+    http.Do(octo.BufferMessage([
+      {"name": "REX", "data": null},
+      {"name": "PUMP", "data": null},
+    ]))
+
+    const socket = new octo.WebsocketClient(socketAttr, {
+      error: function(err){
+        console.log("Error: ", err)
+      },
+      data: function(data, tx, res){
+        var answers = data.toString().split("\r\n").filter(function(item){
+          return item.length !== 0
+        })
+
+        console.log("Websocket:Answers: ", answers)
+      },
+    });
+
+    socket.on("end", function(data){
+      console.log("Ending data: ", data)
+    });
+
+    socket.on("data", function(data){
+      console.log("Logging data: ", data)
+    });
+
+    socket.Do(octo.BufferMessage([
+      {"name": "REX", "data": null},
+      {"name": "PUMP", "data": null},
+    ]));
+
+    </script>
+  </body>
+</html>

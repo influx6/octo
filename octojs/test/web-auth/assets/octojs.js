@@ -69832,7 +69832,7 @@ arguments[4][170][0].apply(exports,arguments)
 (function (Buffer){
 "use strict";
 
-const http = require("http")
+// const http = require("http")
 const url = require("url")
 const websocket = require("websocket-stream")
 const request = require('request');
@@ -69882,14 +69882,15 @@ function ParseAuthCredentialsAsCommand(auth_credentail) {
 
 // Attr returns a default value object which defines the necessary
 // properties that are necessary for using the http object.
-function Attr(addr, clusters, authenticate, headers, drops, recons){
+function Attr(addr, clusters, auth, headers, drops, recons){
 	return {
+		auth: auth,
 		addr: addr || "localhost:3000",
 		headers: headers || {},
 		clusters: clusters || [],
 		maxDrops: drops || 10,
 		maxReconnects: recons || 10,
-		authenticate: authenticate || false,
+		authenticate: auth ? true : false,
 	}
 }
 
@@ -69976,9 +69977,8 @@ class Octo {
 // HTTP defines a function which returns a new instance of an object
 // which allows making request to a underlying octo http server.
 class HTTP extends Octo {
-	constructor(cred, attr, callback){
+	constructor(attr, callback){
 		super(attr, callback)
-		this.credentials = cred
 	}
 
 	// OctoHTTP.do calls the request to be made for a request with the data to
@@ -69989,15 +69989,44 @@ class HTTP extends Octo {
 		};
 
 		var self = this;
+		var headers = {
+				"Content-Type": "application/json",
+		};
+
+		// console.log("Will Auth: ", GetType(self.attr.auth), IsNull(self.attr.auth), self.attr.authenticate)
+
+		if(self.attr.authenticate && !IsNull(self.attr.auth)){
+			// console.log("Adding Auth: ", GetType(self.attr.auth))
+			switch(GetType(self.attr.auth)){
+				case "String":
+					headers["Authorization"] = self.attr.auth;
+					break
+				case "Object":
+					headers["Authorization"] = ParseAuthCredentialsAsHeader(self.attr.auth);
+					break
+				default:
+				  throw new Error("Invalid Auth Object Type");
+			};
+		};
+
+		if(!IsNull(self.attr.headers)){
+			// console.log("Headers: ", self.attr.headers)
+			for(var key in self.attr.headers){
+				var val = self.attr.headers[key];
+
+				if(key === "Authorization" || key === "authorization"){
+					return;
+				};
+
+				headers[key] = val;
+			};
+		};
 
 		try {
 			var req = request({
 				method: "POST",
+				headers: headers,
 				url: this.current.path.href,
-				headers: {
-					"Authorization": ParseAuthCredentialsAsHeader(this.credentials),
-					"Content-Type": "application/json",
-				},
 			}, function(err, res, body){
 				if(err != null || err != undefined){
 					self.current.connected = false
@@ -70017,6 +70046,7 @@ class HTTP extends Octo {
 				}
 			});
 
+			req.on("connect", function(){ self.current.connected = true; });
 			req.end(data, deliveryCallback);
 		}catch(e){
 			  console.log("HTTP Request Error: ", e)
@@ -70028,12 +70058,11 @@ class HTTP extends Octo {
 // Websocket defines a function which returns a new instance of an object
 // which allows making request to a underlying octo http server.
 class Websocket extends Octo {
-	constructor(cred, attr, callback){
+	constructor(attr, callback){
 		super(attr, callback)
 		this.buffer = [];
 		this.servers = [];
 		this.socket = null;
-		this.credentials = cred;
 		this.authenticated = false;
 		this.prepareServers();
 	}
@@ -70127,10 +70156,18 @@ class Websocket extends Octo {
 				 return
 
 				case AuthRequest:
-				 var data = ParseAuthCredentialsAsCommand(self.credentials);
+					var authData = null;
+
+				 switch(GetType(self.attr.auth)){
+					case "Object":
+						 authData = ParseAuthCredentialsAsCommand(self.attr.auth);
+						 break
+				  default:
+						 throw new Error("Invalid Auth Object Type");
+				 }
 
 				 try{
-					 socket.write(data);
+					 socket.write(authData);
 				 }catch(e){
 					 console.log("Authentication request write failed: ", e)
 				 }
@@ -70142,11 +70179,12 @@ class Websocket extends Octo {
 					return
 
 				case AuthGranted:
+				 self.authenticated = true;
+
 				 self.buffer.forEach(function(data){
 					 socket.write(data);
 				 });
 
-				 self.authenticated = true;
 				 self.buffer = []
 				 return
 			}
@@ -70162,7 +70200,9 @@ class Websocket extends Octo {
 		try{
 			self._handleMessage(self._handleMessageParsing(message), socket, next)
 		}catch(e){
+			console.log("Websocket:MessageHandler error: ", e)
 			if(next !== null && next !== undefined){
+				console.log("Websocket:MessageHandler: Passing Data to Next: ", message)
 				next(message, socket, self)
 			}
 		}
@@ -70235,6 +70275,11 @@ function GetType(item){
 	}
 }
 
+// IsNull returns true/false if the giving value is null/undefined.
+function IsNull(item){
+ return (item === null || item === undefined)
+}
+
 module.exports = {
 	Octo: Octo,
 	Attr: Attr,
@@ -70248,7 +70293,7 @@ module.exports = {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":50,"http":157,"request":"request","url":163,"websocket-stream":360}],"request":[function(require,module,exports){
+},{"buffer":50,"request":"request","url":163,"websocket-stream":360}],"request":[function(require,module,exports){
 // Copyright 2010-2012 Mikeal Rogers
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
