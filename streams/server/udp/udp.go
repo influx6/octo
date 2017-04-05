@@ -41,6 +41,7 @@ type ServerAttr struct {
 
 // Server defines a struct for a managing the internals of a UDP server.
 type Server struct {
+	pub                 *server.Pub
 	instruments         octo.Instrumentation
 	Attr                ServerAttr
 	conn                *net.UDPConn
@@ -63,6 +64,7 @@ type Server struct {
 func New(instrument octo.Instrumentation, attr ServerAttr) *Server {
 	var s Server
 	s.Attr = attr
+	s.pub = server.NewPub()
 	s.instruments = instrument
 	s.clientAuthenticated = make(map[string]bool)
 
@@ -82,6 +84,11 @@ func New(instrument octo.Instrumentation, attr ServerAttr) *Server {
 	}
 
 	return &s
+}
+
+// Register registers the handler for a given handler.
+func (s *Server) Register(tm server.StateHandlerType, hmi interface{}) {
+	s.pub.Register(tm, hmi)
 }
 
 // Wait causes a wait on the server.
@@ -243,6 +250,7 @@ func (s *Server) retrieveOrAdd(addr *net.UDPAddr) *Client {
 	}
 
 	cl := Client{
+		pub:         s.pub,
 		server:      s,
 		info:        info,
 		addr:        addr,
@@ -345,6 +353,8 @@ func (s *Server) handleConnections(system server.System) {
 			s.instruments.Log(octo.LOGINFO, s.info.UUID, "udp.Server.handleConnections", "Client Init : %+q", tx.info)
 			defer s.rg.Done()
 
+			tx.pub.Notify(server.ConnectHandler, tx.info, tx, nil)
+
 			if s.Attr.Authenticate {
 
 				// NOTE: We dont need to this here because the Client.authenticate method handles.
@@ -393,6 +403,7 @@ func (s *Server) handleConnections(system server.System) {
 // Client defines the structure which communicates with other udp connections.
 type Client struct {
 	instruments   octo.Instrumentation
+	pub           *server.Pub
 	conn          *net.UDPConn
 	addr          *net.UDPAddr
 	server        *Server
@@ -421,6 +432,7 @@ func (c *Client) authenticate(data []byte) error {
 			Name: string(consts.AuthroizationDenied),
 			Data: []byte(err.Error()),
 		}); cerr == nil {
+			c.pub.Notify(server.ErrorHandler, c.info, c, cerr)
 			c.Send(block, true)
 		}
 
@@ -434,6 +446,7 @@ func (c *Client) authenticate(data []byte) error {
 			Name: string(consts.AuthroizationDenied),
 			Data: []byte(consts.ErrAuthorizationFailed.Error()),
 		}); cerr == nil {
+			c.pub.Notify(server.ErrorHandler, c.info, c, cerr)
 			c.Send(block, true)
 		}
 
@@ -449,6 +462,7 @@ func (c *Client) authenticate(data []byte) error {
 			Name: string(consts.AuthroizationDenied),
 			Data: []byte(err.Error()),
 		}); cerr == nil {
+			c.pub.Notify(server.ErrorHandler, c.info, c, cerr)
 			c.Send(block, true)
 		}
 
@@ -457,6 +471,7 @@ func (c *Client) authenticate(data []byte) error {
 
 	if block, berr := jsoni.Parser.Encode(jsoni.CommandMessage{Name: string(consts.AuthroizationGranted)}); berr == nil {
 		c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.authenticate", "Completed : AuthCredential Authorization Granted : %q", c.info.Addr)
+		c.pub.Notify(server.ErrorHandler, c.info, c, berr)
 		c.Send(block, true)
 	}
 
@@ -527,11 +542,16 @@ func (c *Client) SendAll(data []byte, flush bool) error {
 // udp the server connection handles the response, so operation happens here.
 func (c *Client) Close() error {
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Close", "Started : %+q", c.info)
+
+	c.pub.Notify(server.DisconnectHandler, c.info, c, nil)
+	c.pub.Notify(server.ClosedHandler, c.info, c, nil)
+
 	c.server.cl.Lock()
 	{
 		c.server.clients = append(c.server.clients[:c.index], c.server.clients[c.index+1:]...)
 	}
 	c.server.cl.Unlock()
+
 	c.instruments.Log(octo.LOGINFO, c.info.UUID, "udp.Client.Close", "Completed")
 	return nil
 }

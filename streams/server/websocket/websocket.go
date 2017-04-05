@@ -47,6 +47,7 @@ type SocketAttr struct {
 // SocketServer defines a struct implements the http.ServeHTTP interface which
 // handles servicing http requests for websockets.
 type SocketServer struct {
+	pub         *server.Pub
 	Attr        SocketAttr
 	headers     http.Header
 	instruments octo.Instrumentation
@@ -80,6 +81,7 @@ func New(instruments octo.Instrumentation, attr SocketAttr) *SocketServer {
 	var ws SocketServer
 	ws.Attr = attr
 	ws.headers = headers
+	ws.pub = server.NewPub()
 	ws.instruments = instruments
 	ws.info = octo.Contact{
 		SUUID:  suuid,
@@ -122,6 +124,7 @@ func (s *SocketServer) Listen(system server.System) error {
 		OriginValidator:    s.Attr.OriginValidator,
 		MessageCompression: s.Attr.MessageCompression,
 		SkipCORS:           s.Attr.SkipCORS,
+		Pub:                s.pub,
 	}, s.info, s, system)
 
 	s.rl.Lock()
@@ -212,6 +215,7 @@ type BaseSocketAttr struct {
 	SkipCORS           bool
 	Headers            http.Header
 	OriginValidator    RequestOriginValidator
+	Pub                *server.Pub
 }
 
 // BaseSocketServer defines the struct which implements the core functionality of
@@ -308,6 +312,7 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Remote: r.RemoteAddr,
 	}
 
+	client.pub = s.Attr.Pub
 	client.server = s
 	client.Request = r
 	client.auth = s.auth
@@ -345,6 +350,7 @@ func (s *BaseSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // each request client.
 type Client struct {
 	*websocket.Conn
+	pub           *server.Pub
 	Request       *http.Request
 	instruments   octo.Instrumentation
 	info          octo.Contact
@@ -395,11 +401,13 @@ func (c *Client) authorizationByRequest() error {
 
 	if buf, err = jsoni.Parser.Encode(cmd); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Error : %q", err.Error())
+		c.pub.Notify(server.ErrorHandler, c.info, c, err)
 		return nil
 	}
 
 	if err := c.Send(buf, true); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : Failed to Deliver : Error : %q", err.Error())
+		c.pub.Notify(server.ErrorHandler, c.info, c, err)
 		return nil
 	}
 
@@ -428,6 +436,7 @@ func (c *Client) authorizationByRequest() error {
 						return consts.ErrReadError
 					}
 
+					c.pub.Notify(server.ErrorHandler, c.info, c, err)
 					failedReads++
 					continue authloop
 				}
@@ -442,12 +451,14 @@ func (c *Client) authorizationByRequest() error {
 
 		if err := json.NewDecoder(bytes.NewBuffer(message)).Decode(&authResponse); err != nil {
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
+			c.pub.Notify(server.ErrorHandler, c.info, c, err)
 			return err
 		}
 
 		if authResponse.Name != string(consts.AuthResponse) {
 			err := errors.New("Invalid Request received")
 			c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", err.Error())
+			c.pub.Notify(server.ErrorHandler, c.info, c, err)
 			return err
 		}
 
@@ -458,6 +469,8 @@ func (c *Client) authorizationByRequest() error {
 				Name: string(consts.AuthroizationDenied),
 				Data: []byte(merr.Error()),
 			}); cerr == nil {
+				c.pub.Notify(server.ErrorHandler, c.info, c, cerr)
+
 				if serr := c.Send(block, true); serr != nil {
 					c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Failed to deliver denied message :  %+q", serr.Error())
 				}
@@ -469,6 +482,7 @@ func (c *Client) authorizationByRequest() error {
 		if block, cerr := jsoni.Parser.Encode(jsoni.CommandMessage{
 			Name: string(consts.AuthroizationGranted),
 		}); cerr == nil {
+			c.pub.Notify(server.ErrorHandler, c.info, c, cerr)
 			if serr := c.Send(block, true); serr != nil {
 				c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByRequest", "Completed : %+q", serr.Error())
 			}
@@ -493,17 +507,20 @@ func (c *Client) authorizationByHeader() error {
 	authorizationHeader := c.Request.Header.Get("Authorization")
 	if len(authorizationHeader) == 0 {
 		err := errors.New("'Authorization' header needed for authentication")
+		c.pub.Notify(server.ErrorHandler, c.info, c, err)
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByHeader", "Completed : Error : %+q", err)
 		return err
 	}
 
 	credentials, err := utils.ParseAuthorization(authorizationHeader)
 	if err != nil {
+		c.pub.Notify(server.ErrorHandler, c.info, c, err)
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByHeader", "Completed : Error : %+q", err)
 		return err
 	}
 
 	if err := c.auth.Authenticate(credentials); err != nil {
+		c.pub.Notify(server.ErrorHandler, c.info, c, err)
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.authenticateByHeader", "Completed : Error : %+q", err)
 		return err
 	}
@@ -594,7 +611,11 @@ func (c *Client) Close() error {
 	// Close ping cycle
 	c.closer <- struct{}{}
 
+	c.pub.Notify(server.DisconnectHandler, c.info, c, nil)
+
 	c.sg.Wait()
+
+	c.pub.Notify(server.ClosedHandler, c.info, c, nil)
 
 	if err := c.Conn.Close(); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "websocket.Client.Close", "Closing Websocket Connection : Error : %q", err.Error())
@@ -629,6 +650,8 @@ func (c *Client) Listen() error {
 		c.instruments.Log(octo.LOGINFO, c.info.UUID, "websocket.Client.Listen", "WebSocket Authentication : %+q : %+q", c.Request.RemoteAddr, err.Error())
 		return c.Close()
 	}
+
+	c.pub.Notify(server.ConnectHandler, c.info, c, nil)
 
 	c.wg.Add(1)
 	go c.acceptRequests()

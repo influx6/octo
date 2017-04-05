@@ -105,12 +105,13 @@ func TestHTTPPod(t *testing.T) {
 }
 
 func newBasicServeHTTP(authenticate bool, cred octo.Credentials, system server.System) *httpbasic.BasicServeHTTP {
-	return httpbasic.NewBasicServeHTTP(
-		authenticate,
-		false,
-		instruments.Instruments(mock.NewTestLogger(), nil),
-		utils.NewContact(":6070"),
-		cred,
-		system,
-	)
+	return httpbasic.NewBasicServeHTTP(httpbasic.BasicServeAttr{
+		Authenticate: authenticate,
+		SkipCORS:     false,
+		Instruments:  instruments.Instruments(mock.NewTestLogger(), nil),
+		Pub:          server.NewPub(),
+		Info:         utils.NewContact(":6070"),
+		Auth:         cred,
+		System:       system,
+	})
 }

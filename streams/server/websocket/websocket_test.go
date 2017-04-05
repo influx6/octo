@@ -183,6 +183,7 @@ func TestWebsocketSystem(t *testing.T) {
 	system := &mockSystem{t: t}
 	ws := websocket.NewBaseSocketServer(instruments.Instruments(mock.NewTestLogger(), nil), websocket.BaseSocketAttr{
 		Authenticate: true,
+		Pub:          server.NewPub(),
 	}, utils.NewContact(":6050"), pocket, system)
 
 	server := httptest.NewServer(ws)

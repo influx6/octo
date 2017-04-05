@@ -40,6 +40,7 @@ type BasicAttr struct {
 // BasicServer defines a struct implements the http.ServeHTTP interface which
 // handles servicing http requests for websockets.
 type BasicServer struct {
+	pub         *stream.Pub
 	Attr        BasicAttr
 	instruments octo.Instrumentation
 	info        octo.Contact
@@ -65,6 +66,7 @@ func New(instruments octo.Instrumentation, attr BasicAttr) *BasicServer {
 	var suuid = uuid.NewV4().String()
 
 	var ws BasicServer
+	ws.pub = stream.NewPub()
 	ws.Attr = attr
 	ws.instruments = instruments
 	ws.info = octo.Contact{
@@ -81,6 +83,11 @@ func New(instruments octo.Instrumentation, attr BasicAttr) *BasicServer {
 // Credential return the giving credentails of the provided server.
 func (s *BasicServer) Credential() octo.AuthCredential {
 	return s.Attr.Auth
+}
+
+// Register registers the handler for a given handler.
+func (s *BasicServer) Register(tm stream.StateHandlerType, hmi interface{}) {
+	s.pub.Register(tm, hmi)
 }
 
 // Listen begins the initialization of the websocket server.
@@ -104,7 +111,15 @@ func (s *BasicServer) Listen(system stream.System) error {
 		return err
 	}
 
-	s.basic = NewBasicServeHTTP(s.Attr.Authenticate, s.Attr.SkipCORS, s.instruments, s.info, s, system)
+	s.basic = NewBasicServeHTTP(BasicServeAttr{
+		Authenticate: s.Attr.Authenticate,
+		SkipCORS:     s.Attr.SkipCORS,
+		Instruments:  s.instruments,
+		Pub:          s.pub,
+		Info:         s.info,
+		Auth:         s,
+		System:       system,
+	})
 
 	s.rl.Lock()
 	{
@@ -179,45 +194,50 @@ func (s *BasicServer) isRunning() bool {
 
 //================================================================================
 
+// BasicServeAttr defines a attribute which holds configuration fields for a
+// BasicServeHTTP.
+type BasicServeAttr struct {
+	Authenticate bool
+	SkipCORS     bool
+	Instruments  octo.Instrumentation
+	Info         octo.Contact
+	Auth         octo.Credentials
+	System       stream.System
+	Pub          *stream.Pub
+}
+
 // BasicServeHTTP provides a structure which implements the http.Handler and provides
 // the core server which implements the needed functionality to use the streams.System
 // interface. It is provided as a seperate module to allow flexibility with user
 // created server and routes for http requests.
 type BasicServeHTTP struct {
-	primary      *jsoni.SxConversations
-	system       stream.System
-	instruments  octo.Instrumentation
-	info         octo.Contact
-	sse          *SSEMaster
-	authenticate bool
-	skipCORS     bool
+	Attr        BasicServeAttr
+	primary     *jsoni.SxConversations
+	instruments octo.Instrumentation
 }
 
 // NewBasicServeHTTP returns a new instance of the BasicServeHTTP object.
-func NewBasicServeHTTP(authenticate bool, skipCORS bool, inst octo.Instrumentation, info octo.Contact, auth octo.Credentials, system stream.System) *BasicServeHTTP {
-	primary := jsoni.NewSxConversations(system, server.CloseServer{}, server.ContactServer{}, server.ConversationServer{}, &server.AuthServer{Credentials: auth})
+func NewBasicServeHTTP(attr BasicServeAttr) *BasicServeHTTP {
+	primary := jsoni.NewSxConversations(attr.System, server.CloseServer{}, server.ContactServer{}, server.ConversationServer{}, &server.AuthServer{Credentials: attr.Auth})
 
 	return &BasicServeHTTP{
-		authenticate: authenticate,
-		primary:      primary,
-		system:       system,
-		instruments:  inst,
-		info:         info,
-		skipCORS:     skipCORS,
+		Attr:        attr,
+		primary:     primary,
+		instruments: attr.Instruments,
 	}
 }
 
 // Contact returns the info object associated with this server.
 func (s *BasicServeHTTP) Contact() octo.Contact {
-	return s.info
+	return s.Attr.Info
 }
 
 // ServeHTTP implements the http.Handler.ServeHTTP interface method to handle http request
 // converted to websockets request.
 func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.BasicServeHTTP.ServeHTTP", "Started")
+	s.instruments.Log(octo.LOGINFO, s.Attr.Info.UUID, "http.BasicServeHTTP.ServeHTTP", "Started")
 
-	if !s.skipCORS {
+	if !s.Attr.SkipCORS {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -229,17 +249,10 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	default:
-		s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.BasicServeHTTP.ServeHTTP", "New Request : %q : %q", r.Method, r.URL.Path)
+		s.instruments.Log(octo.LOGINFO, s.Attr.Info.UUID, "http.BasicServeHTTP.ServeHTTP", "New Request : %q : %q", r.Method, r.URL.Path)
 	}
 
 	w.Header().Add("Connection", "keep-alive")
-
-	if !s.skipCORS {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Max-Age", "86400")
-	}
 
 	var data bytes.Buffer
 
@@ -249,38 +262,43 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cuuid = uuid.NewV4().String()
+
 	var basic BasicTransmission
+	basic.pub = s.Attr.Pub
 	basic.ctx = context.NewGoogleContext(r.Context())
 	basic.info = octo.Contact{
 		UUID:   cuuid,
-		SUUID:  s.info.SUUID,
-		Local:  s.info.Addr,
+		SUUID:  s.Attr.Info.SUUID,
+		Local:  s.Attr.Info.Addr,
 		Addr:   r.RemoteAddr,
 		Remote: r.RemoteAddr,
 	}
 
 	basic.instruments = s.instruments
-	basic.system = s.system
+	basic.system = s.Attr.System
 	basic.Request = r
 	basic.Writer = w
 	basic.server = s
 
+	basic.pub.Notify(stream.ConnectHandler, basic.info, &basic, nil)
+
 	if err := basic.authenticate(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		s.instruments.Log(octo.LOGERROR, s.info.UUID, "http.BasicServeHTTP.ServeHTTP", "Authentication : Fails : Error : %+s", err)
-		s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.BasicServeHTTP.ServeHTTP", "Completed")
+		s.instruments.Log(octo.LOGERROR, s.Attr.Info.UUID, "http.BasicServeHTTP.ServeHTTP", "Authentication : Fails : Error : %+s", err)
+		s.instruments.Log(octo.LOGINFO, s.Attr.Info.UUID, "http.BasicServeHTTP.ServeHTTP", "Completed")
 		return
 	}
 
-	s.instruments.Log(octo.LOGTRANSMITTED, s.info.UUID, "http.BasicServeHTTP.ServeHTTP", "Started : %+q", data.Bytes())
-	s.instruments.Log(octo.LOGTRANSMITTED, s.info.UUID, "http.BasicServeHTTP.ServeHTTP", "Completed")
+	s.instruments.Log(octo.LOGTRANSMITTED, s.Attr.Info.UUID, "http.BasicServeHTTP.ServeHTTP", "Started : %+q", data.Bytes())
+	s.instruments.Log(octo.LOGTRANSMITTED, s.Attr.Info.UUID, "http.BasicServeHTTP.ServeHTTP", "Completed")
 
 	if err := s.primary.Serve(data.Bytes(), &basic); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		s.instruments.Log(octo.LOGERROR, s.info.UUID, "http.BasicServeHTTP.ServeHTTP", "BasicServer System : Error : %+s", err)
+		s.instruments.Log(octo.LOGERROR, s.Attr.Info.UUID, "http.BasicServeHTTP.ServeHTTP", "BasicServer System : Error : %+s", err)
 	}
 
-	s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.BasicServeHTTP.ServeHTTP", "Completed")
+	basic.pub.Notify(stream.DisconnectHandler, basic.info, &basic, nil)
+	s.instruments.Log(octo.LOGINFO, s.Attr.Info.UUID, "http.BasicServeHTTP.ServeHTTP", "Completed")
 }
 
 //================================================================================
@@ -290,12 +308,12 @@ func (s *BasicServeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // the `SCHEME TOKEN:APIKEY:APIDATA'` which will then be used for authentication if
 // the
 type BasicTransmission struct {
+	pub         *stream.Pub
 	Request     *http.Request
 	Writer      http.ResponseWriter
 	ctx         context.Context
 	server      *BasicServeHTTP
 	system      stream.System
-	sse         *SSEMaster
 	info        octo.Contact
 	instruments octo.Instrumentation
 	buffer      bytes.Buffer
@@ -305,24 +323,28 @@ type BasicTransmission struct {
 // was valid.
 func (t *BasicTransmission) authenticate() error {
 	t.instruments.Log(octo.LOGINFO, t.info.UUID, "http.BasicTransmission.authenticate", "Started")
-	if !t.server.authenticate {
+	if !t.server.Attr.Authenticate {
 		t.instruments.Log(octo.LOGINFO, t.info.UUID, "http.BasicTransmission.authenticate", "Completed")
 		return nil
 	}
 
 	authorizationHeader := t.Request.Header.Get("Authorization")
 	if len(authorizationHeader) == 0 {
-		return errors.New("'Authorization' header needed for authentication")
+		err := errors.New("'Authorization' header needed for authentication")
+		t.pub.Notify(stream.ErrorHandler, t.info, t, err)
+		return err
 	}
 
 	credentials, err := utils.ParseAuthorization(authorizationHeader)
 	if err != nil {
 		t.instruments.Log(octo.LOGERROR, t.info.UUID, "http.BasicTransmission.authenticate", "Completed : Error : %+q", err)
+		t.pub.Notify(stream.ErrorHandler, t.info, t, err)
 		return err
 	}
 
 	if err := t.system.Authenticate(credentials); err != nil {
 		t.instruments.Log(octo.LOGERROR, t.info.UUID, "http.BasicTransmission.authenticate", "Completed : Error : %+q", err)
+		t.pub.Notify(stream.ErrorHandler, t.info, t, err)
 		return err
 	}
 
@@ -368,7 +390,7 @@ func (t *BasicTransmission) Send(data []byte, flush bool) error {
 
 // Contact returns the giving information for the internal client and server.
 func (t *BasicTransmission) Contact() (octo.Contact, octo.Contact) {
-	return t.info, t.server.info
+	return t.info, t.server.Attr.Info
 }
 
 // Ctx returns the context that is related to this object.
@@ -391,6 +413,7 @@ type SSEMaster struct {
 	base        octo.Contact
 	auth        octo.Authenticator
 	instruments octo.Instrumentation
+	pub         *stream.Pub
 	waiter      sync.WaitGroup
 	data        chan []byte
 	closer      chan struct{}
@@ -407,6 +430,7 @@ func NewSSEMaster(inst octo.Instrumentation, base octo.Contact, auth octo.Authen
 	master.base = base
 	master.auth = auth
 	master.instruments = inst
+	master.pub = stream.NewPub()
 	master.data = make(chan []byte, 0)
 	master.closer = make(chan struct{}, 0)
 	master.newClient = make(chan chan []byte, 0)
@@ -417,6 +441,11 @@ func NewSSEMaster(inst octo.Instrumentation, base octo.Contact, auth octo.Authen
 	go master.manage()
 
 	return &master
+}
+
+// Register registers the handler for a given handler.
+func (s *SSEMaster) Register(tm stream.StateHandlerType, hmi interface{}) {
+	s.pub.Register(tm, hmi)
 }
 
 // Close ends all connections and awaits all stopping of clients gorountines.
@@ -487,8 +516,21 @@ func (s *SSEMaster) manage() {
 	}
 }
 
+// SendAll delivers data to all subscribed clients.
+func (s *SSEMaster) SendAll(data []byte, flush bool) error {
+	s.instruments.Log(octo.LOGINFO, s.base.UUID, "http.SSEMaster.SendAll", "Started : {%+q}", data)
+
+	if err := s.Send(data, flush); err != nil {
+		s.instruments.Log(octo.LOGERROR, s.base.UUID, "http.SSEMaster.SendAll", "Completed : %+q", err)
+		return err
+	}
+
+	s.instruments.Log(octo.LOGINFO, s.base.UUID, "http.SSEMaster.SendAll", "Completed")
+	return nil
+}
+
 // Send delivers a giving data to all clients within the connected
-func (s *SSEMaster) Send(data []byte) error {
+func (s *SSEMaster) Send(data []byte, flush bool) error {
 	s.instruments.Log(octo.LOGINFO, s.base.UUID, "http.SSEMaster.Send", "Started : {%+q}", data)
 	s.cl.Lock()
 	if s.closed {
@@ -518,7 +560,9 @@ func (s *SSEMaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.newClient <- data
 
 	// Create new sse client.
-	newClient := NewSSEClient(s.instruments, s.auth, contact, data, s.closer)
+	newClient := NewSSEClient(s.instruments, s.auth, s.pub, s, contact, data, s.closer)
+
+	s.pub.Notify(stream.ConnectHandler, contact, newClient, nil)
 
 	s.waiter.Add(1)
 	defer s.waiter.Done()
@@ -529,6 +573,8 @@ func (s *SSEMaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Remove giving channel from channel list.
 	s.closeClient <- data
 
+	s.pub.Notify(stream.DisconnectHandler, contact, newClient, nil)
+
 	s.instruments.Log(octo.LOGINFO, s.base.UUID, "http.SSEMaster.ServeHTTP", "Completed")
 }
 
@@ -537,6 +583,9 @@ func (s *SSEMaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // SSEClient defines a struct which implements the http.Handler interface for
 // handling http server-sent requests.
 type SSEClient struct {
+	Data          bytes.Buffer
+	pub           *stream.Pub
+	master        *SSEMaster
 	info          octo.Contact
 	notifications chan []byte
 	closer        chan struct{}
@@ -545,14 +594,44 @@ type SSEClient struct {
 }
 
 // NewSSEClient returns a new instance of a SSEServer.
-func NewSSEClient(instruments octo.Instrumentation, auth octo.Authenticator, info octo.Contact, notifications chan []byte, closer chan struct{}) *SSEClient {
+func NewSSEClient(instruments octo.Instrumentation, auth octo.Authenticator, pub *stream.Pub, sm *SSEMaster, info octo.Contact, notifications chan []byte, closer chan struct{}) *SSEClient {
 	return &SSEClient{
+		pub:           pub,
+		master:        sm,
 		auth:          auth,
 		notifications: notifications,
 		closer:        closer,
 		info:          info,
 		instruments:   instruments,
 	}
+}
+
+// Close does nothing.
+func (s *SSEClient) Close() error {
+	return nil
+}
+
+// SendAll delivers data to all subscribed clients.
+func (s *SSEClient) SendAll(data []byte, flush bool) error {
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.SSEClient.SendAll", "Started : {%+q}", data)
+
+	if err := s.master.SendAll(data, flush); err != nil {
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "http.SSEClient.SendAll", "Completed : %+q", err)
+		return err
+	}
+
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.SSEClient.SendAll", "Completed")
+	return nil
+}
+
+// Send delivers a giving data to all clients within the connected
+func (s *SSEClient) Send(data []byte, flush bool) error {
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.SSEClient.Send", "Started : {%+q}", data)
+
+	s.notifications <- data
+
+	s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.SSEClient.Send", "Completed")
+	return nil
 }
 
 // authenticate runs the authentication procedure to authenticate that the connection
@@ -566,17 +645,25 @@ func (s *SSEClient) authenticate(request *http.Request) error {
 
 	authorizationHeader := request.Header.Get("Authorization")
 	if len(authorizationHeader) == 0 {
-		return errors.New("'Authorization' header needed for authentication")
+		err := errors.New("'Authorization' header needed for authentication")
+		s.instruments.Log(octo.LOGERROR, s.info.UUID, "http.SSEClient.authenticate", "Completed : Error : %+q", err)
+
+		s.pub.Notify(stream.ErrorHandler, s.info, s, err)
+		return err
 	}
 
 	credentials, err := utils.ParseAuthorization(authorizationHeader)
 	if err != nil {
 		s.instruments.Log(octo.LOGERROR, s.info.UUID, "http.SSEClient.authenticate", "Completed : Error : %+q", err)
+
+		s.pub.Notify(stream.ErrorHandler, s.info, s, err)
 		return err
 	}
 
 	if err := s.auth.Authenticate(credentials); err != nil {
 		s.instruments.Log(octo.LOGERROR, s.info.UUID, "http.SSEClient.authenticate", "Completed : Error : %+q", err)
+
+		s.pub.Notify(stream.ErrorHandler, s.info, s, err)
 		return err
 	}
 
@@ -589,15 +676,26 @@ func (s *SSEClient) authenticate(request *http.Request) error {
 func (s *SSEClient) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpsee.SSEClient.ServeHTTP", "Started")
 
+	var data bytes.Buffer
+
+	if r.Body != nil {
+		io.Copy(&data, r.Body)
+		r.Body.Close()
+	}
+
+	s.Data = data
+
 	if err := s.authenticate(r); err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpsee.WeaveServer.ServeHTTP", "Completed : Error : Failed to autnethicate : %+q", err)
 		http.Error(w, "Http Streaming not supported", http.StatusInternalServerError)
+		// s.pub.Notify(stream.ErrorHandler, s.info, s, err)
 		return
 	}
 
 	if err := s.authenticate(r); err != nil {
 		s.instruments.Log(octo.LOGINFO, s.info.UUID, "httpsee.SSEClient.ServeHTTP", "Completed : Error : Failed to autnethicate : %+q", err)
 		http.Error(w, "Http Streaming not supported", http.StatusInternalServerError)
+		// s.pub.Notify(stream.ErrorHandler, s.info, s, err)
 		return
 	}
 

@@ -54,16 +54,6 @@ func (t *Transmission) Ctx() context.Context {
 	return t.ctx
 }
 
-// // NotifyPing sends a ping notification arrival to this client.
-// func (t *Transmission) NotifyPing() {
-// 	t.client.NotifyPing()
-// }
-//
-// // NotifyPong sends a pong arrival notification to this client.
-// func (t *Transmission) NotifyPong() {
-// 	t.client.NotifyPong()
-// }
-
 // Close ends the internal conneciton.
 func (t *Transmission) Close() error {
 	go t.client.Close()
@@ -75,6 +65,7 @@ func (t *Transmission) Close() error {
 // Client defines the tcp struct which implements the server.Stream
 // interface for communication between a server.
 type Client struct {
+	pub                   *server.Pub
 	ppMisses              int64
 	closer                chan struct{}
 	pongs                 chan struct{}
@@ -132,6 +123,7 @@ func (c *Client) Close() error {
 
 	close(c.closer)
 
+	c.pub.Notify(server.ClosedHandler, c.info, c, nil)
 	// c.sg.Wait()
 
 	if err := c.conn.Close(); err != nil {
@@ -235,6 +227,8 @@ func (c *Client) Listen() error {
 			}
 		}
 	}
+
+	c.pub.Notify(server.ConnectHandler, c.info, c, nil)
 
 	// Initialize and request authentication from client if allowed.
 	if c.server.ServerAttr.Authenticate && !c.connectionInitiator {
@@ -548,6 +542,8 @@ func (c *Client) acceptRequests() {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
 			}
+
+			c.pub.Notify(server.DisconnectHandler, c.info, c, nil)
 
 			// TODO: Do we really want to continue here?
 			if err == io.EOF {
@@ -943,12 +939,14 @@ func (c *Client) initAuthNegotiation() error {
 	block, err := c.temporaryRead()
 	if err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", err)
+		c.pub.Notify(server.ErrorHandler, c.info, c, err)
 		return err
 	}
 
 	msgs, err := commando.Parser.Decode(block)
 	if err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", err)
+		c.pub.Notify(server.ErrorHandler, c.info, c, err)
 		return err
 	}
 
@@ -967,6 +965,7 @@ func (c *Client) initAuthNegotiation() error {
 
 	if !bytes.Equal([]byte(messages[0].Name), consts.AuthResponse) {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Completed : Error : %s ", ErrAuthInvalidResponse)
+		c.pub.Notify(server.ErrorHandler, c.info, c, ErrAuthInvalidResponse)
 		return ErrAuthInvalidResponse
 	}
 
@@ -975,12 +974,15 @@ func (c *Client) initAuthNegotiation() error {
 	authData := bytes.Join(messages[0].Data, []byte(""))
 	if err := json.Unmarshal(authData, &auth); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Initialization Failed : %s", err)
+		c.pub.Notify(server.ErrorHandler, c.info, c, err)
 		return err
 	}
 
 	if err := c.authenticator.Authenticate(auth); err != nil {
 		c.instruments.Log(octo.LOGERROR, c.info.UUID, "tcp.Client.initAuthNegotiation", "Client Negotiation : Authentication Failed : %s", err)
 		c.Send(commando.MakeByteMessage(consts.AuthroizationDenied, []byte(err.Error())), true)
+
+		c.pub.Notify(server.ErrorHandler, c.info, c, err)
 		return err
 	}
 
@@ -1019,6 +1021,7 @@ func (c *Client) temporaryRead() ([]byte, error) {
 					return nil, consts.ErrTimeoutOverReached
 				}
 
+				c.pub.Notify(server.DisconnectHandler, c.info, c, nil)
 				readtimeCount++
 				continue
 			}
@@ -1066,6 +1069,7 @@ type ServerAttr struct {
 // of the way tcp works.
 type Server struct {
 	ServerAttr
+	pub                    *server.Pub
 	instruments            octo.Instrumentation
 	info                   octo.Contact
 	clusterContact         octo.Contact
@@ -1110,6 +1114,7 @@ func New(instruments octo.Instrumentation, attr ServerAttr) *Server {
 	}
 
 	var s Server
+	s.pub = server.NewPub()
 	s.ServerAttr = attr
 	s.clusterConnectFailures = make(map[string]int)
 	s.instruments = instruments
@@ -1129,6 +1134,11 @@ func New(instruments octo.Instrumentation, attr ServerAttr) *Server {
 	}
 
 	return &s
+}
+
+// Register registers the handler for a given handler.
+func (s *Server) Register(tm server.StateHandlerType, hmi interface{}) {
+	s.pub.Register(tm, hmi)
 }
 
 // CLContact returns the octo.Contact related with this server cluster listener.
@@ -1306,6 +1316,7 @@ func (s *Server) RelateWithCluster(addr string) error {
 
 	var client Client
 	client = Client{
+		pub: s.pub,
 		info: octo.Contact{
 			Addr:   localAddr,
 			Local:  localAddr,
@@ -1327,6 +1338,7 @@ func (s *Server) RelateWithCluster(addr string) error {
 
 	if err := client.Listen(); err != nil {
 		s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.RelateWithCluster", "New Client Error : %s", err.Error())
+		s.pub.Notify(server.ClosedHandler, client.info, &client, err)
 		client.conn.Close()
 
 		// Record failure to connect client.
@@ -1605,6 +1617,7 @@ func (s *Server) handleClientConnections() {
 
 		var client Client
 		client = Client{
+			pub: s.pub,
 			info: octo.Contact{
 				Addr:   remoteAddr,
 				Local:  localAddr,
@@ -1626,6 +1639,7 @@ func (s *Server) handleClientConnections() {
 
 		if err := client.Listen(); err != nil {
 			s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.handleClientConnections", "New Client Error : %s", err.Error())
+			s.pub.Notify(server.ClosedHandler, client.info, &client, err)
 			client.conn.Close()
 			continue
 		}
@@ -1773,6 +1787,7 @@ func (s *Server) handleClusterConnections() {
 
 		var client Client
 		client = Client{
+			pub: s.pub,
 			info: octo.Contact{
 				Addr:   remoteAddr,
 				Local:  localAddr,
@@ -1794,6 +1809,7 @@ func (s *Server) handleClusterConnections() {
 
 		if err := client.Listen(); err != nil {
 			s.instruments.Log(octo.LOGERROR, s.info.UUID, "tcp.Server.handleClusterConnections", "New Client Error : %s", err.Error())
+			s.pub.Notify(server.ClosedHandler, client.info, &client, err)
 			client.conn.Close()
 			continue
 		}
