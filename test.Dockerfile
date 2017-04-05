@@ -1,6 +1,6 @@
 FROM golang:latest
 
-ADD . /go/src/github.com/influx6/octo
+COPY . /go/src/github.com/influx6/octo
 
 WORKDIR /go/src/github.com/influx6/octo
 
