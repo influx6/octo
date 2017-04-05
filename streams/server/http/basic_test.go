@@ -85,12 +85,56 @@ func (mockSystem) Serve(message []byte, tx server.Stream) error {
 	return nil
 }
 
+// TestSSEProtocol validates the http basic protocol for the
+// octo package.
+func TestSSEProtocol(t *testing.T) {
+
+	server := newSSEServeHTTP(mockSystem{})
+
+	t.Logf("\tWhen request %q command with correct authorization", "/events")
+	{
+		header := make(map[string]string)
+		header["X-App"] = "Octo-App"
+		header["Authorization"] = "XBot api-32:auth-4531:BOMTx"
+
+		req, err := newEventRequest(header)
+		if err != nil {
+			tests.Failed("Should have successfully created request for /event.")
+		}
+		tests.Passed("Should have successfully created request for /event.")
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusInternalServerError {
+			tests.Failed("Should have successfully failed due to response notifier %d", recorder.Code)
+		}
+		tests.Passed("Should have successfully failed due to response notifier.")
+	}
+}
+
 // TestHTTPBaiscProtocol validates the http basic protocol for the
 // octo package.
 func TestHTTPBaiscProtocol(t *testing.T) {
 	pocket := mock.NewCredentialPocket(octo.AuthCredential{})
 
-	server := newBasicServeHTTP(t, true, pocket, mockSystem{})
+	server := newBasicServeHTTP(true, pocket, mockSystem{})
+
+	t.Logf("\tWhen request %q command with correct authorization", "/events")
+	{
+		header := make(map[string]string)
+		header["X-App"] = "Octo-App"
+		header["Authorization"] = "XBot api-32:auth-4531:BOMTx"
+
+		req, err := newEventRequest(header)
+		if err != nil {
+			tests.Failed("Should have successfully created request for command %q", "info")
+		}
+		tests.Passed("Should have successfully created request for command %q", "info")
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+	}
 
 	t.Logf("\tWhen request %q command with correct authorization", consts.ContactRequest)
 	{
@@ -170,7 +214,15 @@ func TestHTTPBaiscProtocol(t *testing.T) {
 
 }
 
-func newBasicServeHTTP(t *testing.T, authenticate bool, cred octo.Credentials, system server.System) *httpbasic.BasicServeHTTP {
+func newSSEServeHTTP(system server.System) *httpbasic.SSEMaster {
+	return httpbasic.NewSSEMaster(
+		instruments.Instruments(mock.NewTestLogger(), nil),
+		utils.NewContact(":6070"),
+		system,
+	)
+}
+
+func newBasicServeHTTP(authenticate bool, cred octo.Credentials, system server.System) *httpbasic.BasicServeHTTP {
 	return httpbasic.NewBasicServeHTTP(
 		authenticate,
 		false,
@@ -179,6 +231,20 @@ func newBasicServeHTTP(t *testing.T, authenticate bool, cred octo.Credentials, s
 		cred,
 		system,
 	)
+}
+
+// newEventRequest returns a new request with the provided body as a command set.
+func newEventRequest(header map[string]string) (*http.Request, error) {
+	rq, err := http.NewRequest("GET", "/events", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	for key, value := range header {
+		rq.Header.Set(key, value)
+	}
+
+	return rq, nil
 }
 
 // newMessageRequest returns a new request with the provided body as a command set.
@@ -195,7 +261,7 @@ func newMessageRequest(header map[string]string, command string, msgs ...string)
 		return nil, err
 	}
 
-	rq, err := http.NewRequest("GET", "/basic", &body)
+	rq, err := http.NewRequest("GET", "/", &body)
 	if err != nil {
 		return nil, err
 	}
