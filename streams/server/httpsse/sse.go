@@ -288,7 +288,7 @@ func (s *SSEServerMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						Details:    map[string]interface{}{},
 					})
 
-					fmt.Fprintf(w, "%s", data)
+					fmt.Fprintf(w, "%s\n\n", data)
 
 					// Flush data immedaitely to client.
 					flusher.Flush()

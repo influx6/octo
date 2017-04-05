@@ -427,8 +427,9 @@ type SSEMaster struct {
 	waiter      sync.WaitGroup
 	data        chan []byte
 	closer      chan struct{}
-	ml          sync.RWMutex
-	channels    map[string]chan []byte
+	newClient   chan chan []byte
+	closeClient chan chan []byte
+	channels    map[chan []byte]bool
 	cl          sync.Mutex
 	closed      bool
 }
@@ -441,7 +442,9 @@ func NewSSEMaster(inst octo.Instrumentation, base octo.Contact, auth octo.Authen
 	master.instruments = inst
 	master.data = make(chan []byte, 0)
 	master.closer = make(chan struct{}, 0)
-	master.channels = make(map[string]chan []byte, 0)
+	master.newClient = make(chan chan []byte, 0)
+	master.closeClient = make(chan chan []byte, 0)
+	master.channels = make(map[chan []byte]bool, 0)
 
 	// Spin up the management routine.
 	go master.manage()
@@ -483,19 +486,30 @@ func (s *SSEMaster) manage() {
 			case <-s.closer:
 				break mloop
 
+			case c, ok := <-s.closeClient:
+				if !ok {
+					break mloop
+				}
+
+				delete(s.channels, c)
+				continue
+
+			case c, ok := <-s.newClient:
+				if !ok {
+					break mloop
+				}
+
+				s.channels[c] = true
+				continue
+
 			case data, ok := <-s.data:
 				if !ok {
 					break mloop
 				}
 
-				s.ml.RLock()
-				{
-					for _, client := range s.channels {
-						// TODO: Should we really go-routine this?
-						go func(c chan []byte) { c <- data }(client)
-					}
+				for client := range s.channels {
+					client <- data
 				}
-				s.ml.RUnlock()
 			}
 		}
 	}
@@ -529,14 +543,7 @@ func (s *SSEMaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	data := make(chan []byte)
 
-	defer close(data)
-
-	// Add the notification channel to channels slice.
-	s.ml.Lock()
-	{
-		s.channels[contact.UUID] = data
-	}
-	s.ml.Unlock()
+	s.newClient <- data
 
 	// Create new sse client.
 	newClient := NewSSEClient(s.instruments, s.auth, contact, data, s.closer)
@@ -548,11 +555,7 @@ func (s *SSEMaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	newClient.ServeHTTP(w, r)
 
 	// Remove giving channel from channel list.
-	s.ml.Lock()
-	{
-		delete(s.channels, contact.UUID)
-	}
-	s.ml.Unlock()
+	s.closeClient <- data
 
 	s.instruments.Log(octo.LOGINFO, s.base.UUID, "http.SSEMaster.ServeHTTP", "Completed")
 }
@@ -683,7 +686,7 @@ func (s *SSEClient) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						Details:    map[string]interface{}{},
 					})
 
-					fmt.Fprintf(w, "%s\r\n", data)
+					fmt.Fprintf(w, "%s\n\n", data)
 
 					// Flush data immedaitely to client.
 					flusher.Flush()
