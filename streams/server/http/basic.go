@@ -415,6 +415,7 @@ type SSEMaster struct {
 	instruments octo.Instrumentation
 	pub         *stream.Pub
 	waiter      sync.WaitGroup
+	header      map[string]string
 	data        chan []byte
 	closer      chan struct{}
 	newClient   chan chan []byte
@@ -425,10 +426,11 @@ type SSEMaster struct {
 }
 
 // NewSSEMaster returns a new instance of a SSEMaster.
-func NewSSEMaster(inst octo.Instrumentation, base octo.Contact, auth octo.Authenticator) *SSEMaster {
+func NewSSEMaster(inst octo.Instrumentation, base octo.Contact, auth octo.Authenticator, header map[string]string) *SSEMaster {
 	var master SSEMaster
 	master.base = base
 	master.auth = auth
+	master.header = header
 	master.instruments = inst
 	master.pub = stream.NewPub()
 	master.data = make(chan []byte, 0)
@@ -547,6 +549,11 @@ func (s *SSEMaster) Send(data []byte, flush bool) error {
 // ServeHTTP generates a new client for the server sent events based on the
 func (s *SSEMaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.instruments.Log(octo.LOGINFO, s.base.UUID, "http.SSEMaster.ServeHTTP", "Started : %q", r.RemoteAddr)
+
+	// Add headers.
+	for key, value := range s.header {
+		w.Header().Add(key, value)
+	}
 
 	var contact octo.Contact
 	contact.UUID = uuid.NewV4().String()

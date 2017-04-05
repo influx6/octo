@@ -219,6 +219,9 @@ func newSSEServeHTTP(system server.System) *httpbasic.SSEMaster {
 		instruments.Instruments(mock.NewTestLogger(), nil),
 		utils.NewContact(":6070"),
 		system,
+		map[string]string{
+			"X-App": "SSE",
+		},
 	)
 }
 
