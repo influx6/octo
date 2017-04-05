@@ -508,7 +508,12 @@ func (s *SSEMaster) manage() {
 				}
 
 				for client := range s.channels {
-					client <- data
+					select {
+					case client <- data:
+						// Data sent to client
+					case <-time.After(3 * time.Second):
+						// Data not consumed by client
+					}
 				}
 			}
 		}
