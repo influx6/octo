@@ -47,7 +47,7 @@ type UDPPod struct {
 	udpVersion  string
 	localAddr   string
 	instruments octo.Instrumentation
-	pub         *octo.Pub
+	pub         *client.Pub
 	servers     []*srvAddr
 	curAddr     *srvAddr
 	bm          bytes.Buffer
@@ -73,7 +73,7 @@ func New(insts octo.Instrumentation, attr Attr) (*UDPPod, error) {
 	var pod UDPPod
 	pod.attr = attr
 	pod.instruments = insts
-	pod.pub = octo.NewPub()
+	pod.pub = client.NewPub()
 	pod.localAddr = netutils.GetAddr(attr.ClientAddr)
 
 	switch attr.Version {
@@ -120,14 +120,14 @@ func (w *UDPPod) Close() error {
 		return consts.ErrClosedConnection
 	}
 
-	w.notify(octo.ClosedHandler, nil)
+	w.notify(client.ClosedHandler, nil)
 
 	w.cnl.Lock()
 	w.doClose = true
 	w.cnl.Unlock()
 
 	if err := w.conn.Close(); err != nil {
-		w.notify(octo.ErrorHandler, err)
+		w.notify(client.ErrorHandler, err)
 
 		w.cnl.Lock()
 		w.conn = nil
@@ -147,12 +147,12 @@ func (w *UDPPod) Close() error {
 }
 
 // Register registers the handler for a given handler.
-func (w *UDPPod) Register(tm octo.StateHandlerType, hmi interface{}) {
+func (w *UDPPod) Register(tm client.StateHandlerType, hmi interface{}) {
 	w.pub.Register(tm, hmi)
 }
 
 // notify calls the giving callbacks for each different type of state.
-func (w *UDPPod) notify(n octo.StateHandlerType, err error) {
+func (w *UDPPod) notify(n client.StateHandlerType, err error) {
 	var cm octo.Contact
 
 	if w.curAddr != nil {
@@ -332,7 +332,7 @@ func (w *UDPPod) reconnect() error {
 
 	w.cnl.Lock()
 	if w.started {
-		w.notify(octo.DisconnectHandler, nil)
+		w.notify(client.DisconnectHandler, nil)
 	}
 	w.cnl.Unlock()
 
@@ -358,7 +358,7 @@ func (w *UDPPod) reconnect() error {
 
 	conn, err := NewUDPConn(w.udpVersion, w.localAddr, addr)
 	if err != nil {
-		w.notify(octo.DisconnectHandler, err)
+		w.notify(client.DisconnectHandler, err)
 		w.curAddr.drops++
 		return w.reconnect()
 	}
@@ -370,7 +370,7 @@ func (w *UDPPod) reconnect() error {
 	w.curAddr.reconnecting = false
 	w.cnl.Unlock()
 
-	w.notify(octo.ConnectHandler, nil)
+	w.notify(client.ConnectHandler, nil)
 
 	if err := w.initConnectionSetup(); err != nil {
 		return err
@@ -454,7 +454,7 @@ func (w *UDPPod) acceptRequests() {
 		data, addr, err := w.conn.Read()
 		// fmt.Printf("Accept::Err: %+q\n", err)
 		if err != nil {
-			w.notify(octo.ErrorHandler, err)
+			w.notify(client.ErrorHandler, err)
 
 			if err == consts.ErrAbitraryCloseConnection || err == consts.ErrClosedConnection || err == consts.ErrUnstableRead {
 				go w.reconnect()
@@ -466,12 +466,12 @@ func (w *UDPPod) acceptRequests() {
 
 		val, err := w.encoding.Decode(data)
 		if err != nil {
-			w.notify(octo.ErrorHandler, err)
+			w.notify(client.ErrorHandler, err)
 			continue
 		}
 
 		if err := w.system.Serve(val, &ulink{UDPPod: w, targetAddr: addr}); err != nil {
-			w.notify(octo.ErrorHandler, err)
+			w.notify(client.ErrorHandler, err)
 			continue
 		}
 	}

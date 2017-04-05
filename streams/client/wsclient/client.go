@@ -35,7 +35,7 @@ type Attr struct {
 type WebSocketPod struct {
 	attr        Attr
 	instruments octo.Instrumentation
-	pub         *octo.Pub
+	pub         *client.Pub
 	servers     []*srvAddr
 	curAddr     *srvAddr
 	bm          bytes.Buffer
@@ -61,7 +61,7 @@ func New(insts octo.Instrumentation, attr Attr) (*WebSocketPod, error) {
 	var pod WebSocketPod
 	pod.attr = attr
 	pod.instruments = insts
-	pod.pub = octo.NewPub()
+	pod.pub = client.NewPub()
 
 	// Prepare all server registering and validate paths.
 	if err := pod.prepareServers(); err != nil {
@@ -95,14 +95,14 @@ func (w *WebSocketPod) Close() error {
 		return consts.ErrClosedConnection
 	}
 
-	w.notify(octo.ClosedHandler, nil)
+	w.notify(client.ClosedHandler, nil)
 
 	w.cnl.Lock()
 	w.doClose = true
 	w.cnl.Unlock()
 
 	if err := w.conn.Close(); err != nil {
-		w.notify(octo.ErrorHandler, err)
+		w.notify(client.ErrorHandler, err)
 
 		w.cnl.Lock()
 		w.conn = nil
@@ -120,12 +120,12 @@ func (w *WebSocketPod) Close() error {
 }
 
 // Register registers the handler for a given handler.
-func (w *WebSocketPod) Register(tm octo.StateHandlerType, hmi interface{}) {
+func (w *WebSocketPod) Register(tm client.StateHandlerType, hmi interface{}) {
 	w.pub.Register(tm, hmi)
 }
 
 // notify calls the giving callbacks for each different type of state.
-func (w *WebSocketPod) notify(n octo.StateHandlerType, err error) {
+func (w *WebSocketPod) notify(n client.StateHandlerType, err error) {
 	var cm octo.Contact
 
 	if w.curAddr != nil {
@@ -272,7 +272,7 @@ func (w *WebSocketPod) reconnect() error {
 
 	w.cnl.Lock()
 	if w.started {
-		w.notify(octo.DisconnectHandler, nil)
+		w.notify(client.DisconnectHandler, nil)
 	}
 	w.cnl.Unlock()
 
@@ -307,7 +307,7 @@ func (w *WebSocketPod) reconnect() error {
 	// fmt.Printf("NewConn: %q -> %+q\n", w.attr.Addr, err)
 
 	if err != nil {
-		w.notify(octo.DisconnectHandler, err)
+		w.notify(client.DisconnectHandler, err)
 		w.curAddr.drops++
 		return w.reconnect()
 	}
@@ -319,7 +319,7 @@ func (w *WebSocketPod) reconnect() error {
 	w.curAddr.reconnecting = false
 	w.cnl.Unlock()
 
-	w.notify(octo.ConnectHandler, nil)
+	w.notify(client.ConnectHandler, nil)
 
 	go w.acceptRequests()
 
@@ -338,7 +338,7 @@ func (w *WebSocketPod) acceptRequests() {
 		data, err := w.conn.Read()
 		// fmt.Printf("Accept::Err: %+q\n", err)
 		if err != nil {
-			w.notify(octo.ErrorHandler, err)
+			w.notify(client.ErrorHandler, err)
 
 			if err == consts.ErrAbitraryCloseConnection || err == consts.ErrClosedConnection || err == consts.ErrUnstableRead {
 				go w.reconnect()
@@ -350,12 +350,12 @@ func (w *WebSocketPod) acceptRequests() {
 
 		val, err := w.encoding.Decode(data)
 		if err != nil {
-			w.notify(octo.ErrorHandler, err)
+			w.notify(client.ErrorHandler, err)
 			continue
 		}
 
 		if err := w.system.Serve(val, w); err != nil {
-			w.notify(octo.ErrorHandler, err)
+			w.notify(client.ErrorHandler, err)
 			continue
 		}
 	}

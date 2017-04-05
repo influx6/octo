@@ -2,7 +2,6 @@ package http_test
 
 import (
 	"errors"
-	"fmt"
 	"net/http/httptest"
 	"testing"
 
@@ -67,7 +66,7 @@ func TestHTTPPod(t *testing.T) {
 
 		t.Logf("\tWhen provided a system for handling request")
 		{
-			client, err := http.New(insts, http.Attr{
+			coclient, err := http.New(insts, http.Attr{
 				Authenticate: true,
 				Addr:         serverURL,
 				Headers: map[string]string{
@@ -80,27 +79,19 @@ func TestHTTPPod(t *testing.T) {
 			}
 			tests.Passed("Should have successfully created connection for http server.")
 
-			client.Register(octo.ConnectHandler, func(c octo.Contact) {
-				fmt.Printf("Connect Contact: %#v\n", c)
-			})
-
-			client.Register(octo.DisconnectHandler, func(c octo.Contact) {
-				fmt.Printf("Disconnect Contact: %#v\n", c)
-			})
-
-			if err := client.Listen(clientSystem, jsoni.Parser); err != nil {
+			if err := coclient.Listen(clientSystem, jsoni.Parser); err != nil {
 				tests.Failed("Should have successfully listened for connection to http server: %+q.", err)
 			}
 			tests.Passed("Should have successfully listened for connection to http server.")
 
-			if err := client.Send(jsoni.CommandMessage{
+			if err := coclient.Send(jsoni.CommandMessage{
 				Name: ("PUMP"),
 			}, true); err != nil {
 				tests.Failed("Should have successfully delivered command to server: %+q.", err)
 			}
 			tests.Passed("Should have successfully delivered command to server.")
 
-			if err := client.Send(jsoni.CommandMessage{
+			if err := coclient.Send(jsoni.CommandMessage{
 				Name: ("GLOP"),
 			}, true); err == nil {
 				tests.Failed("Should have successfully failed to process command to server: %+q.", err)
@@ -116,6 +107,7 @@ func TestHTTPPod(t *testing.T) {
 func newBasicServeHTTP(authenticate bool, cred octo.Credentials, system server.System) *httpbasic.BasicServeHTTP {
 	return httpbasic.NewBasicServeHTTP(
 		authenticate,
+		false,
 		instruments.Instruments(mock.NewTestLogger(), nil),
 		utils.NewContact(":6070"),
 		cred,

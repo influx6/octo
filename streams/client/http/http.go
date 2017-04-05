@@ -32,7 +32,7 @@ type Attr struct {
 type ClientPod struct {
 	attr        Attr
 	instruments octo.Instrumentation
-	pub         *octo.Pub
+	pub         *client.Pub
 	servers     []*srvAddr
 	curAddr     *srvAddr
 	bm          bytes.Buffer
@@ -57,7 +57,7 @@ func New(insts octo.Instrumentation, attr Attr) (*ClientPod, error) {
 	var pod ClientPod
 	pod.attr = attr
 	pod.instruments = insts
-	pod.pub = octo.NewPub()
+	pod.pub = client.NewPub()
 
 	// Prepare all server registering and validate paths.
 	if err := pod.prepareServers(); err != nil {
@@ -92,7 +92,7 @@ func (w *ClientPod) Close() error {
 		return consts.ErrClosedConnection
 	}
 
-	w.notify(octo.ClosedHandler, nil)
+	w.notify(client.ClosedHandler, nil)
 
 	w.bm.Reset()
 
@@ -105,12 +105,12 @@ func (w *ClientPod) Close() error {
 }
 
 // Register registers the handler for a given handler.
-func (w *ClientPod) Register(tm octo.StateHandlerType, hmi interface{}) {
+func (w *ClientPod) Register(tm client.StateHandlerType, hmi interface{}) {
 	w.pub.Register(tm, hmi)
 }
 
 // notify calls the giving callbacks for each different type of state.
-func (w *ClientPod) notify(n octo.StateHandlerType, err error) {
+func (w *ClientPod) notify(n client.StateHandlerType, err error) {
 	var cm octo.Contact
 
 	if w.curAddr != nil {
@@ -336,7 +336,7 @@ func (w *ClientPod) reconnect() error {
 	w.cnl.Unlock()
 
 	if started {
-		w.notify(octo.DisconnectHandler, nil)
+		w.notify(client.DisconnectHandler, nil)
 	}
 
 	if err := w.getNextServer(); err != nil {
@@ -357,7 +357,7 @@ func (w *ClientPod) reconnect() error {
 	w.curAddr.reconnecting = false
 	w.cnl.Unlock()
 
-	w.notify(octo.ConnectHandler, nil)
+	w.notify(client.ConnectHandler, nil)
 
 	return nil
 }

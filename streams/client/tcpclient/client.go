@@ -32,7 +32,7 @@ type Attr struct {
 // TCPPod defines a TCP implementation which connects
 // to a provided TCP endpoint for making requests.
 type TCPPod struct {
-	pub         *octo.Pub
+	pub         *client.Pub
 	attr        Attr
 	instruments octo.Instrumentation
 	servers     []*srvAddr
@@ -59,7 +59,7 @@ func New(insts octo.Instrumentation, attr Attr) *TCPPod {
 	}
 
 	var pod TCPPod
-	pod.pub = octo.NewPub()
+	pod.pub = client.NewPub()
 	pod.attr = attr
 	pod.instruments = insts
 
@@ -101,14 +101,14 @@ func (w *TCPPod) Close() error {
 		return consts.ErrClosedConnection
 	}
 
-	w.notify(octo.ClosedHandler, nil)
+	w.notify(client.ClosedHandler, nil)
 
 	w.cnl.Lock()
 	w.doClose = true
 	w.cnl.Unlock()
 
 	if err := w.conn.Close(); err != nil {
-		w.notify(octo.ErrorHandler, err)
+		w.notify(client.ErrorHandler, err)
 
 		w.cnl.Lock()
 		w.conn = nil
@@ -128,12 +128,12 @@ func (w *TCPPod) Close() error {
 }
 
 // Register registers the handler for a given handler.
-func (w *TCPPod) Register(tm octo.StateHandlerType, hmi interface{}) {
+func (w *TCPPod) Register(tm client.StateHandlerType, hmi interface{}) {
 	w.pub.Register(tm, hmi)
 }
 
 // notify calls the giving callbacks for each different type of state.
-func (w *TCPPod) notify(n octo.StateHandlerType, err error) {
+func (w *TCPPod) notify(n client.StateHandlerType, err error) {
 	var cm octo.Contact
 
 	if w.curAddr != nil {
@@ -274,7 +274,7 @@ func (w *TCPPod) reconnect() error {
 
 	w.cnl.Lock()
 	if w.started {
-		w.notify(octo.DisconnectHandler, nil)
+		w.notify(client.DisconnectHandler, nil)
 	}
 	w.cnl.Unlock()
 
@@ -302,7 +302,7 @@ func (w *TCPPod) reconnect() error {
 
 	conn, err := NewTCPConn(addr, newConf)
 	if err != nil {
-		w.notify(octo.DisconnectHandler, err)
+		w.notify(client.DisconnectHandler, err)
 
 		w.cnl.Lock()
 		{
@@ -324,10 +324,10 @@ func (w *TCPPod) reconnect() error {
 	}
 	w.cnl.Unlock()
 
-	w.notify(octo.ConnectHandler, nil)
+	w.notify(client.ConnectHandler, nil)
 
 	if err := w.initConnectionSetup(); err != nil {
-		w.notify(octo.ErrorHandler, err)
+		w.notify(client.ErrorHandler, err)
 		return err
 	}
 
@@ -422,7 +422,7 @@ func (w *TCPPod) acceptRequests() {
 
 		data, err := w.conn.Read()
 		if err != nil {
-			w.notify(octo.ErrorHandler, err)
+			w.notify(client.ErrorHandler, err)
 
 			if err == consts.ErrAbitraryCloseConnection || err == consts.ErrClosedConnection || err == consts.ErrUnstableRead {
 				go w.reconnect()
@@ -453,12 +453,12 @@ func (w *TCPPod) acceptRequests() {
 
 		val, err := w.encoding.Decode(data)
 		if err != nil {
-			w.notify(octo.ErrorHandler, err)
+			w.notify(client.ErrorHandler, err)
 			continue
 		}
 
 		if err := w.system.Serve(val, w); err != nil {
-			w.notify(octo.ErrorHandler, err)
+			w.notify(client.ErrorHandler, err)
 			continue
 		}
 	}
