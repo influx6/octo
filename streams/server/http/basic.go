@@ -47,7 +47,6 @@ type BasicServer struct {
 	listener    net.Listener
 	wg          sync.WaitGroup
 	basic       *BasicServeHTTP
-	ssemaster   *SSEMaster
 	tree        *httptreemux.TreeMux
 	rl          sync.Mutex
 	running     bool
@@ -68,7 +67,6 @@ func New(instruments octo.Instrumentation, attr BasicAttr) *BasicServer {
 	var ws BasicServer
 	ws.Attr = attr
 	ws.instruments = instruments
-	ws.tree = httptreemux.New()
 	ws.info = octo.Contact{
 		SUUID:  suuid,
 		UUID:   suuid,
@@ -107,14 +105,6 @@ func (s *BasicServer) Listen(system stream.System) error {
 	}
 
 	s.basic = NewBasicServeHTTP(s.Attr.Authenticate, s.Attr.SkipCORS, s.instruments, s.info, s, system)
-	s.ssemaster = NewSSEMaster(s.instruments, s.info, system)
-
-	s.tree.HEAD("/*", s.serveOption)
-	s.tree.OPTIONS("/*", s.serveOption)
-
-	s.tree.GET("/events", s.serveEvents)
-	s.tree.GET("/", s.serveRoot)
-	s.tree.POST("/", s.serveRoot)
 
 	s.rl.Lock()
 	{
@@ -129,27 +119,6 @@ func (s *BasicServer) Listen(system stream.System) error {
 	return nil
 }
 
-// serveRoot
-func (s *BasicServer) serveRoot(w http.ResponseWriter, r *http.Request, _ map[string]string) {
-	s.basic.ServeHTTP(w, r)
-}
-
-// serveEvents defines a function which routes requests to the SSE master handler.
-func (s *BasicServer) serveEvents(w http.ResponseWriter, r *http.Request, _ map[string]string) {
-	s.ssemaster.ServeHTTP(w, r)
-}
-
-func (s *BasicServer) serveOption(w http.ResponseWriter, r *http.Request, _ map[string]string) {
-	if !s.Attr.SkipCORS {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Max-Age", "86400")
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // ServeHTTP implements the http.Handler.ServeHTTP interface method to handle http request
 // converted to websockets request.
 func (s *BasicServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +130,7 @@ func (s *BasicServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call basic to treat the request.
-	s.tree.ServeHTTP(w, r)
+	s.basic.ServeHTTP(w, r)
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.BasicServer.ServeHTTP", "Completed")
 }
@@ -183,10 +152,6 @@ func (s *BasicServer) Close() error {
 
 	if err := s.server.Close(); err != nil {
 		s.instruments.Log(octo.LOGERROR, s.info.UUID, "http.BasicServer.Close", "Completed : %+q", err.Error())
-	}
-
-	if terr := s.ssemaster.Close(); terr != nil {
-		s.instruments.Log(octo.LOGERROR, s.info.UUID, "http.BasicServer.Close", "Completed : SSEMaster : %+q", terr.Error())
 	}
 
 	s.instruments.Log(octo.LOGINFO, s.info.UUID, "http.BasicServer.Close", "Completed")
@@ -223,6 +188,7 @@ type BasicServeHTTP struct {
 	system       stream.System
 	instruments  octo.Instrumentation
 	info         octo.Contact
+	sse          *SSEMaster
 	authenticate bool
 	skipCORS     bool
 }
@@ -329,6 +295,7 @@ type BasicTransmission struct {
 	ctx         context.Context
 	server      *BasicServeHTTP
 	system      stream.System
+	sse         *SSEMaster
 	info        octo.Contact
 	instruments octo.Instrumentation
 	buffer      bytes.Buffer
