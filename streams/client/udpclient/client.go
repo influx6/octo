@@ -159,7 +159,7 @@ func (w *UDPPod) notify(n client.StateHandlerType, err error) {
 		cm = w.curAddr.contact
 	}
 
-	w.pub.Notify(n, cm, err)
+	w.pub.Notify(n, cm, w, err)
 }
 
 // SendWithAddr delivers the giving message to the underline websocket connection.

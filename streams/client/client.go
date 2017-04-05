@@ -49,11 +49,11 @@ const (
 
 // StateHandler defines a function which is called for the change of state of a
 // connection eg closed, connected, disconnected.
-type StateHandler func(octo.Contact)
+type StateHandler func(octo.Contact, Stream)
 
 // ErrorStateHandler defines a function which is called for the error that occurs
 // during connections.
-type ErrorStateHandler func(octo.Contact, error)
+type ErrorStateHandler func(octo.Contact, Stream, error)
 
 // Pub defines a set of structure for holding different callbacks for the lifecycle
 // operations of a giving connection.
@@ -124,35 +124,35 @@ func (w *Pub) Register(tm StateHandlerType, hmi interface{}) {
 }
 
 // Notify calls the giving callbacks for each different type of state.
-func (w *Pub) Notify(n StateHandlerType, cm octo.Contact, err error) {
+func (w *Pub) Notify(n StateHandlerType, cm octo.Contact, sm Stream, err error) {
 	switch n {
 	case ErrorHandler:
 		w.cml.Lock()
 		defer w.cml.Unlock()
 
 		for _, handler := range w.errors {
-			handler(cm, err)
+			handler(cm, sm, err)
 		}
 	case ConnectHandler:
 		w.cml.Lock()
 		defer w.cml.Unlock()
 
 		for _, handler := range w.connects {
-			handler(cm)
+			handler(cm, sm)
 		}
 	case DisconnectHandler:
 		w.cml.Lock()
 		defer w.cml.Unlock()
 
 		for _, handler := range w.disconnects {
-			handler(cm)
+			handler(cm, sm)
 		}
 	case ClosedHandler:
 		w.cml.Lock()
 		defer w.cml.Unlock()
 
 		for _, handler := range w.closes {
-			handler(cm)
+			handler(cm, sm)
 		}
 	}
 }

@@ -140,7 +140,7 @@ func (w *TCPPod) notify(n client.StateHandlerType, err error) {
 		cm = w.curAddr.contact
 	}
 
-	w.pub.Notify(n, cm, err)
+	w.pub.Notify(n, cm, w, err)
 }
 
 // Send delivers the giving message to the underline TCP connection.
@@ -532,21 +532,27 @@ func NewTCPConn(addr string, tlsConf *tls.Config) (*TCPConn, error) {
 // SetDeadline sets the base deadline of the connection.
 func (t *TCPConn) SetDeadline(tl time.Time) {
 	t.cl.Lock()
-	t.conn.SetDeadline(tl)
+	if t.conn != nil {
+		t.conn.SetDeadline(tl)
+	}
 	t.cl.Unlock()
 }
 
 // SetWriteDeadline sets the read deadline of the connection.
 func (t *TCPConn) SetWriteDeadline(tl time.Time) {
 	t.cl.Lock()
-	t.conn.SetWriteDeadline(tl)
+	if t.conn != nil {
+		t.conn.SetWriteDeadline(tl)
+	}
 	t.cl.Unlock()
 }
 
 // SetReadDeadline sets the read deadline of the connection.
 func (t *TCPConn) SetReadDeadline(tl time.Time) {
 	t.cl.Lock()
-	t.conn.SetReadDeadline(tl)
+	if t.conn != nil {
+		t.conn.SetReadDeadline(tl)
+	}
 	t.cl.Unlock()
 }
 
