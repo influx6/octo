@@ -19,10 +19,10 @@ Protocols
 
 Octo currently provides 4 implemented protocols with plans to expand the list as time goes on.
 
--	TCP *Server an Client Packages*
--	HTTP *Server an Client Packages*
--	UDP *Server an Client Packages*
--	Websocket *Server an Client Packages*
+-	TCP *Server and Client Packages*
+-	HTTP *Server and Client Packages*
+-	UDP *Server and Client Packages*
+-	Websocket *Server and Client Packages*
 -	Quic (Pending)
 
 Client Libraries
